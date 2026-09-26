@@ -1,0 +1,126 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #1a1a14;
+  font-family: 'VT323', monospace;
+  font-size: 20px;
+  color: #e8dfc8;
+}
+
+#game {
+  position: absolute;
+  top: 0;
+  left: 0;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.panel {
+  position: absolute;
+  background: rgba(24, 20, 14, 0.78);
+  border: 2px solid #5e4c34;
+  box-shadow: inset 0 0 0 1px #2a2218;
+  padding: 6px 10px;
+  line-height: 1.1;
+}
+
+#info {
+  top: 10px;
+  left: 10px;
+  min-width: 190px;
+}
+
+#info b {
+  color: #f2d27a;
+  font-weight: normal;
+}
+
+.warn {
+  color: #ff7a5a;
+}
+
+#panel {
+  top: 10px;
+  right: 10px;
+  width: 250px;
+}
+
+#panel label {
+  display: block;
+  color: #b8a888;
+  margin-top: 2px;
+}
+
+.row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+input,
+button {
+  font: inherit;
+  color: #e8dfc8;
+  background: #2c251b;
+  border: 1px solid #6b5a3e;
+  padding: 0 6px;
+  height: 26px;
+  min-width: 0;
+}
+
+input {
+  flex: 1;
+}
+
+button {
+  cursor: pointer;
+  background: #4a3b28;
+}
+
+button.wide {
+  flex: 1;
+}
+
+button:hover {
+  background: #5e4c34;
+}
+
+#minimap {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 192px;
+  height: 192px;
+  image-rendering: pixelated;
+  border: 2px solid #5e4c34;
+}
+
+#minimap.hidden {
+  display: none;
+}
+
+#help {
+  left: 10px;
+  bottom: 10px;
+  font-size: 17px;
+  max-width: calc(100% - 230px);
+  color: #b8a888;
+}
+
+#tooltip {
+  display: none;
+  pointer-events: none;
+  z-index: 10;
+  white-space: nowrap;
+}
+
+#tooltip small {
+  color: #f2d27a;
+  font-size: 17px;
+}
