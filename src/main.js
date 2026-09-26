@@ -8,6 +8,9 @@ import { biomeColor } from './gfx/ground.js';
 import { Player } from './player.js';
 import { Survival } from './survival.js';
 import { Hud } from './hud.js';
+import { Inventory } from './inventory.js';
+import { InventoryUI } from './inventoryUI.js';
+import { isWaterBiome as isWater } from './world/biomes.js';
 
 // ---------- Renderer & pixel-perfect camera ----------
 // The scene is rendered at low resolution, then scaled up by a whole
@@ -58,6 +61,7 @@ let gen = new WorldGenerator(seedFromText(seedText));
 const chunks = new ChunkManager(scene, gen, sprites);
 const player = new Player(scene, sprites.atlas.rects, chunks.objectMat, chunks.shadowMat);
 const survival = new Survival();
+const inventory = new Inventory();
 let runToggle = false; // the boot button: run without holding Shift
 
 /** Nearest free spot to a point, searching outwards in a spiral. */
@@ -89,6 +93,8 @@ function startWorld(text, x = 0, y = 0) {
   [player.x, player.y] = findSpawn(x, y);
   chunks.update(player.x, player.y, viewW, viewH, 0, true);
   survival.reset(); // a new world is a new game
+  inventory.reset(gen.seed);
+  inventory.playerPos = { x: player.x, y: player.y };
   ui.seed.value = seedText;
   document.activeElement?.blur(); // give the keyboard back to the game
   const url = new URL(location.href);
@@ -115,6 +121,11 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'F3') {
     e.preventDefault();
     toggleDebug();
+  } else if (e.code === 'KeyI' || e.code === 'Tab') {
+    e.preventDefault();
+    invUI.toggle(chunks);
+  } else if (e.code === 'Escape' && invUI.open) {
+    invUI.close();
   } else if (e.code === 'KeyJ' || (e.code === 'Escape' && !ui.journal.classList.contains('hidden'))) {
     toggleJournal();
   } else if (KEYS[e.code]) {
@@ -160,8 +171,27 @@ const hud = new Hud($('hud'), sprites.atlas, {
   settings: () => toggleDebug(),
   journal: () => toggleJournal(),
   interact: () => survival.say('There is nothing here to use.'),
-  backpack: () => survival.say('My backpack is empty.'),
+  backpack: () => invUI.toggle(chunks),
   toggleRun: () => (runToggle = !runToggle),
+});
+
+/** Is there water within a couple of steps of the player? (for filling a canteen) */
+function nearWater() {
+  for (const [dx, dy] of [[0, 0], [20, 0], [-20, 0], [0, 20], [0, -20], [14, 14], [-14, 14], [14, -14], [-14, -14]]) {
+    if (isWater(gen.biomeAt(player.x + dx, player.y + dy))) return true;
+  }
+  return false;
+}
+
+const invUI = new InventoryUI($('inventory'), inventory, {
+  use: (loc) => {
+    const msg = inventory.use(loc, survival, nearWater());
+    if (msg) survival.say(msg);
+  },
+  quickTake: (loc) => {
+    const msg = inventory.quickTake(loc);
+    if (msg) survival.say(msg);
+  },
 });
 
 function toggleDebug() {
@@ -330,7 +360,13 @@ function frame(now) {
   const running = input.run || runToggle;
   player.update(dt, { ...input, run: running }, gen, chunks);
   chunks.update(player.x, player.y, viewW, viewH);
-  survival.update(dt, { running, moving: player.moving, biome: gen.biomeAt(player.x, player.y) });
+  inventory.playerPos = { x: player.x, y: player.y };
+  survival.update(dt, {
+    running,
+    moving: player.moving,
+    biome: gen.biomeAt(player.x, player.y),
+    clothingHeat: inventory.heat,
+  });
 
   // Camera follows the player on whole pixels.
   const camX = Math.round(player.x);
@@ -353,6 +389,7 @@ function frame(now) {
     const dpr = window.devicePixelRatio || 1;
     const headY = window.innerHeight / 2 - (30 * pixelScale) / dpr;
     hud.update(survival, { running, headY });
+    invUI.refresh();
     updateJournal();
     if (!ui.debug.classList.contains('hidden')) updateInfo();
     updateTooltip();
@@ -366,4 +403,4 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // Handy for debugging in the browser console.
-window.game = { get gen() { return gen; }, chunks, player, survival, CHUNK_PX };
+window.game = { get gen() { return gen; }, chunks, player, survival, inventory, CHUNK_PX };

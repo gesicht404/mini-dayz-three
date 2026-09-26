@@ -13,7 +13,8 @@ Add `?seed=12345&x=100&y=-50` to the URL to open a specific seed at a tile posit
 
 ## Controls
 
-WASD / arrows move · Shift (or the boot button) run · C switch character · J journal ·
+WASD / arrows move · Shift (or the boot button) run · I / Tab (or the backpack button) inventory ·
+C switch character · J journal ·
 F3 (or the gear button) debug panel with seed, teleport and minimap · F explore mode ·
 + / − zoom · M minimap · hover objects to see resources
 
@@ -25,6 +26,20 @@ interact (right), backpack (bottom-left), walk/run toggle (bottom-right), and
 thoughts above the player. Water and food drain over time (faster when running),
 health drops when starving, dehydrated or freezing, and the day/night clock
 runs one game minute per real second.
+
+## Inventory
+
+Like Mini DayZ: **Vicinity** on the left lists what's near you (berries from
+berry bushes, mushrooms, sticks from bushes, stones from rocks, wood from logs
+and stumps, loot in supply crates and hunting towers, and anything you dropped).
+The right side has equipment slots (face, head, shirt, vest, trousers, gloves,
+backpack; pistol and rifle are shown but locked until weapons exist). Worn
+clothing shows its condition, heat and pockets; a backpack adds 8 slots.
+
+Drag items between slots, drag onto Vicinity to drop, double-click to use
+(eat, drink, fill the canteen next to a lake, or wear clothing). Worn clothing
+heat raises your temperature. You start with a T-shirt (berries) and jeans
+(canteen), like the original.
 
 ## Structure
 
@@ -41,6 +56,9 @@ runs one game minute per real second.
 - `src/player.js`: movement, animation, collision
 - `src/survival.js`: health, water, food, temperature, clock, thoughts
 - `src/hud.js`: the HUD (pixel-art icons, parchment, bars, portrait)
+- `src/items.js`: item types, equipment slots, loot table, item icons
+- `src/inventory.js`: equipment, pockets, vicinity piles, moving/using items
+- `src/inventoryUI.js`: the inventory panel with drag and drop
 - `src/main.js`: renderer, pixel-perfect camera, HUD, game loop
 
 ## Player art

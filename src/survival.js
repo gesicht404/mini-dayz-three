@@ -13,6 +13,7 @@ const HARM_PER_SECOND = 0.35; // health lost per bad condition
 const HEAL_PER_SECOND = 0.08;
 const THOUGHT_EVERY = 45; // seconds between repeated complaints
 const THOUGHT_SHOWN = 4;
+const CLOTHING_HEAT_FACTOR = 0.35; // T-shirt + jeans (heat 7) is about +2.5
 
 export class Survival {
   constructor() {
@@ -51,17 +52,17 @@ export class Survival {
     return Math.min(1, Math.max(0, (0.25 - sun) / 0.75));
   }
 
-  /** Temperature from time of day, biome and effort. Clothing heat will add to this later. */
-  environmentTemp(biome, running) {
+  /** Temperature from time of day, biome, effort and worn clothing. */
+  environmentTemp(biome, running, clothingHeat = 0) {
     let t = 1 - Math.round(this.darkness * 4);
     if (biome === BIOME.SWAMP || biome === BIOME.SHORE || biome === BIOME.ROCKY) t -= 1;
     if (biome === BIOME.WATER || biome === BIOME.DEEP_WATER) t -= 2;
     if (biome === BIOME.FIELD) t += 1;
     if (running) t += 1;
-    return t;
+    return t + clothingHeat * CLOTHING_HEAT_FACTOR;
   }
 
-  update(dt, { running, moving, biome }) {
+  update(dt, { running, moving, biome, clothingHeat = 0 }) {
     this.minutes += dt * MINUTES_PER_SECOND;
     this.aliveSeconds += dt;
     this.stats.score = Math.floor(this.aliveSeconds / 60) * 2;
@@ -70,7 +71,7 @@ export class Survival {
     this.water = Math.max(0, this.water - WATER_DRAIN * effort * dt);
     this.food = Math.max(0, this.food - FOOD_DRAIN * effort * dt);
     // Temperature eases toward the environment instead of jumping.
-    const target = this.environmentTemp(biome, running && moving);
+    const target = this.environmentTemp(biome, running && moving, clothingHeat);
     this.temperature += (target - this.temperature) * Math.min(1, dt * 0.2);
 
     let harm = 0;
