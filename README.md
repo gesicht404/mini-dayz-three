@@ -5,7 +5,7 @@ A top-down pixel-art survival game (inspired by Mini DayZ) built with Three.js.
 ## Run
 
 ```bash
-npm start
+npm run dev
 ```
 
 Then open http://localhost:5173. No install needed: Three.js loads from a CDN.
