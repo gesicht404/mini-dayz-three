@@ -2,6 +2,15 @@
   box-sizing: border-box;
 }
 
+:root {
+  /* One HUD art pixel; set from JS to match the screen size. */
+  --u: 2px;
+}
+
+.hidden {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
@@ -30,9 +39,23 @@ body {
   line-height: 1.1;
 }
 
-#info {
-  top: 10px;
+/* ---------- Debug panel (F3) ---------- */
+
+.debug-col {
+  position: absolute;
+  top: calc(var(--u) * 50);
   left: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 5;
+}
+
+.debug-col .panel {
+  position: static;
+}
+
+#info {
   min-width: 190px;
 }
 
@@ -46,8 +69,6 @@ body {
 }
 
 #panel {
-  top: 10px;
-  right: 10px;
   width: 250px;
 }
 
@@ -94,7 +115,8 @@ button:hover {
 #minimap {
   position: absolute;
   right: 10px;
-  bottom: 10px;
+  bottom: calc(var(--u) * 30);
+  z-index: 5;
   width: 192px;
   height: 192px;
   image-rendering: pixelated;
@@ -107,7 +129,8 @@ button:hover {
 
 #help {
   left: 10px;
-  bottom: 10px;
+  bottom: calc(var(--u) * 30);
+  z-index: 5;
   font-size: 17px;
   max-width: calc(100% - 230px);
   color: #b8a888;
@@ -123,4 +146,239 @@ button:hover {
 #tooltip small {
   color: #f2d27a;
   font-size: 17px;
+}
+
+/* ---------- HUD (like Mini DayZ) ---------- */
+
+#hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  font-size: calc(var(--u) * 10);
+}
+
+.art {
+  display: block;
+  image-rendering: pixelated;
+}
+
+#hud .hud-button {
+  pointer-events: auto;
+  background: none;
+  border: 0;
+  padding: 0;
+  height: auto;
+}
+
+#hud .hud-button:hover canvas {
+  filter: brightness(1.08);
+}
+
+.hud-portrait {
+  position: absolute;
+  top: calc(var(--u) * 3);
+  left: calc(var(--u) * 3);
+}
+
+.hud-score {
+  width: calc(var(--u) * 34);
+  margin-top: calc(var(--u) * -1);
+  background: #cbbd96;
+  border: var(--u) solid #4a3c28;
+  color: #231c13;
+  text-align: center;
+  font-size: calc(var(--u) * 10);
+  line-height: calc(var(--u) * 9);
+}
+
+.hud-bars {
+  position: absolute;
+  top: calc(var(--u) * 5);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: calc(var(--u) * 8);
+}
+
+.hud-stat {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 2);
+}
+
+.hud-bar {
+  position: relative;
+  width: calc(var(--u) * 44);
+  height: calc(var(--u) * 7);
+  background: #2e2a22;
+  border: var(--u) solid #15110c;
+  box-shadow: inset 0 var(--u) 0 #1a1610, 0 0 0 var(--u) #5c5344;
+}
+
+.hud-fill {
+  height: 100%;
+  transition: width 0.3s linear;
+}
+
+/* Hard-edged bands: highlight on top, shade at the bottom (pixel style). */
+.hud-fill.health {
+  background: linear-gradient(#e07a72 0 30%, #b93b36 30% 75%, #862622 75%);
+}
+
+.hud-fill.water {
+  background: linear-gradient(#9fd4e8 0 30%, #4f9ab8 30% 75%, #37718a 75%);
+}
+
+.hud-fill.food {
+  background: linear-gradient(#a9cf74 0 30%, #69a04a 30% 75%, #497733 75%);
+}
+
+.hud-fill.temp {
+  background: linear-gradient(#f0dc84 0 30%, #c9b04a 30% 75%, #958231 75%);
+}
+
+.hud-temp-mark {
+  position: absolute;
+  top: calc(var(--u) * -1);
+  bottom: calc(var(--u) * -1);
+  width: var(--u);
+  background: #f4f0dc;
+  transition: left 0.3s linear;
+}
+
+.hud-temp-text {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -52%);
+  color: #f4f0dc;
+  font-size: calc(var(--u) * 10);
+  line-height: 1;
+  text-shadow:
+    var(--u) 0 #15110c,
+    calc(var(--u) * -1) 0 #15110c,
+    0 var(--u) #15110c,
+    0 calc(var(--u) * -1) #15110c;
+}
+
+.hud-right {
+  position: absolute;
+  top: calc(var(--u) * 3);
+  right: calc(var(--u) * 3);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: calc(var(--u) * 3);
+}
+
+.hud-clock {
+  position: relative;
+}
+
+.hud-clock-icon {
+  position: absolute;
+  left: calc(var(--u) * 2);
+  top: calc(var(--u) * 2);
+}
+
+.hud-clock-text {
+  position: absolute;
+  left: calc(var(--u) * 14);
+  top: calc(var(--u) * 0.5);
+  color: #1d1812;
+  font-size: calc(var(--u) * 15);
+  line-height: calc(var(--u) * 14);
+}
+
+.hud-interact {
+  position: absolute;
+  right: calc(var(--u) * 3);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.hud-backpack {
+  position: absolute;
+  left: calc(var(--u) * 3);
+  bottom: calc(var(--u) * 3);
+}
+
+.hud-run {
+  position: absolute;
+  right: calc(var(--u) * 3);
+  bottom: calc(var(--u) * 3);
+}
+
+#hud .hud-run.active canvas {
+  outline: var(--u) solid #f2d27a;
+}
+
+.hud-thoughts {
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, -100%);
+  text-align: center;
+  white-space: nowrap;
+  color: #ecd95a;
+  font-size: calc(var(--u) * 9);
+  line-height: 1;
+  text-shadow:
+    var(--u) 0 #1d1812,
+    calc(var(--u) * -1) 0 #1d1812,
+    0 var(--u) #1d1812,
+    0 calc(var(--u) * -1) #1d1812;
+}
+
+.hud-night {
+  position: absolute;
+  inset: 0;
+  background: #0b1026;
+  opacity: 0;
+}
+
+/* ---------- Journal (stats) ---------- */
+
+#journal {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(92vw, calc(var(--u) * 240));
+  z-index: 20;
+  cursor: pointer;
+}
+
+.journal-tab {
+  display: inline-block;
+  margin-left: calc(var(--u) * 16);
+  padding: calc(var(--u) * 2) calc(var(--u) * 24);
+  background: #3b2d21;
+  border: var(--u) solid #1d1510;
+  border-bottom: 0;
+  font-size: calc(var(--u) * 12);
+  color: #efe6d0;
+}
+
+.journal-body {
+  padding: calc(var(--u) * 10) calc(var(--u) * 16);
+  background: repeating-linear-gradient(90deg, #3b2d21 0 calc(var(--u) * 5), #35281d calc(var(--u) * 5) calc(var(--u) * 9));
+  border: var(--u) solid #1d1510;
+  box-shadow: inset 0 0 0 var(--u) #54402e;
+}
+
+#journalStats {
+  border-collapse: collapse;
+  font-size: calc(var(--u) * 12);
+  color: #efe6d0;
+}
+
+#journalStats td {
+  padding: 0 calc(var(--u) * 24) 0 0;
+  line-height: calc(var(--u) * 13);
+}
+
+.journal-hint {
+  margin-top: calc(var(--u) * 6);
+  color: #a8987c;
+  font-size: calc(var(--u) * 8);
 }

@@ -6,6 +6,8 @@ import { seedFromText } from './world/rng.js';
 import { buildSprites, CHARACTERS } from './gfx/sprites.js';
 import { biomeColor } from './gfx/ground.js';
 import { Player } from './player.js';
+import { Survival } from './survival.js';
+import { Hud } from './hud.js';
 
 // ---------- Renderer & pixel-perfect camera ----------
 // The scene is rendered at low resolution, then scaled up by a whole
@@ -40,6 +42,9 @@ function resize() {
   camera.bottom = -Math.floor(viewH / 2);
   camera.top = viewH - Math.floor(viewH / 2);
   camera.updateProjectionMatrix();
+  // HUD art pixels stay at a fixed size (2x on 1080p) regardless of game zoom.
+  const hudScale = Math.max(2, Math.round(devH / 540));
+  document.documentElement.style.setProperty('--u', `${hudScale / dpr}px`);
 }
 window.addEventListener('resize', resize);
 resize();
@@ -52,6 +57,8 @@ let seedText = params.get('seed') || String(Math.floor(Math.random() * 1e9));
 let gen = new WorldGenerator(seedFromText(seedText));
 const chunks = new ChunkManager(scene, gen, sprites);
 const player = new Player(scene, sprites.atlas.rects, chunks.objectMat, chunks.shadowMat);
+const survival = new Survival();
+let runToggle = false; // the boot button: run without holding Shift
 
 /** Nearest free spot to a point, searching outwards in a spiral. */
 function findSpawn(x, y) {
@@ -81,6 +88,7 @@ function startWorld(text, x = 0, y = 0) {
   chunks.setGenerator(gen);
   [player.x, player.y] = findSpawn(x, y);
   chunks.update(player.x, player.y, viewW, viewH, 0, true);
+  survival.reset(); // a new world is a new game
   ui.seed.value = seedText;
   document.activeElement?.blur(); // give the keyboard back to the game
   const url = new URL(location.href);
@@ -104,7 +112,12 @@ const KEYS = {
 
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
-  if (KEYS[e.code]) {
+  if (e.code === 'F3') {
+    e.preventDefault();
+    toggleDebug();
+  } else if (e.code === 'KeyJ' || (e.code === 'Escape' && !ui.journal.classList.contains('hidden'))) {
+    toggleJournal();
+  } else if (KEYS[e.code]) {
     input[KEYS[e.code]] = true;
     e.preventDefault();
   } else if (e.code === 'KeyF') {
@@ -138,7 +151,42 @@ const ui = {
   ty: $('ty'),
   tooltip: $('tooltip'),
   minimap: $('minimap'),
+  debug: $('debug'),
+  journal: $('journal'),
+  journalStats: $('journalStats'),
 };
+
+const hud = new Hud($('hud'), sprites.atlas, {
+  settings: () => toggleDebug(),
+  journal: () => toggleJournal(),
+  interact: () => survival.say('There is nothing here to use.'),
+  backpack: () => survival.say('My backpack is empty.'),
+  toggleRun: () => (runToggle = !runToggle),
+});
+
+function toggleDebug() {
+  ui.debug.classList.toggle('hidden');
+}
+
+function toggleJournal() {
+  ui.journal.classList.toggle('hidden');
+  updateJournal();
+}
+ui.journal.addEventListener('click', toggleJournal);
+
+function updateJournal() {
+  if (ui.journal.classList.contains('hidden')) return;
+  const rows = [
+    ['Score', survival.stats.score],
+    ['Minutes alive', Math.floor(survival.aliveSeconds / 60)],
+    ['Infected killed', survival.stats.infectedKilled],
+    ['Bandits killed', survival.stats.banditsKilled],
+    ['Karma', survival.stats.karma],
+    ['Days survived', survival.daysSurvived],
+    ['Character', CHARACTERS[player.character]],
+  ];
+  ui.journalStats.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+}
 
 $('newWorld').addEventListener('click', () => startWorld(ui.seed.value));
 $('randomWorld').addEventListener('click', () => startWorld(String(Math.floor(Math.random() * 1e9))));
@@ -157,6 +205,7 @@ for (const el of document.querySelectorAll('#panel input, #panel button')) {
 function setCharacter(id) {
   player.character = id;
   ui.character.textContent = CHARACTERS[id];
+  hud.setCharacter(id);
   try {
     localStorage.setItem('character', id);
   } catch {
@@ -219,7 +268,7 @@ const mm = ui.minimap.getContext('2d');
 const MM_SIZE = ui.minimap.width;
 const MM_STEP = 24; // world px per minimap pixel
 function drawMinimap() {
-  if (ui.minimap.classList.contains('hidden')) return;
+  if (ui.minimap.classList.contains('hidden') || ui.debug.classList.contains('hidden')) return;
   const img = mm.createImageData(MM_SIZE, MM_SIZE);
   const cache = {};
   for (let j = 0; j < MM_SIZE; j++) {
@@ -278,8 +327,10 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
 
-  player.update(dt, input, gen, chunks);
+  const running = input.run || runToggle;
+  player.update(dt, { ...input, run: running }, gen, chunks);
   chunks.update(player.x, player.y, viewW, viewH);
+  survival.update(dt, { running, moving: player.moving, biome: gen.biomeAt(player.x, player.y) });
 
   // Camera follows the player on whole pixels.
   const camX = Math.round(player.x);
@@ -298,7 +349,12 @@ function frame(now) {
   }
   if (hudTime > 0.1) {
     hudTime = 0;
-    updateInfo();
+    // Just above the player's head: the sprite is ~28 art px tall, scaled like the world.
+    const dpr = window.devicePixelRatio || 1;
+    const headY = window.innerHeight / 2 - (30 * pixelScale) / dpr;
+    hud.update(survival, { running, headY });
+    updateJournal();
+    if (!ui.debug.classList.contains('hidden')) updateInfo();
     updateTooltip();
   }
   if (mapTime > 0.4) {
@@ -310,4 +366,4 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // Handy for debugging in the browser console.
-window.game = { get gen() { return gen; }, chunks, player, CHUNK_PX };
+window.game = { get gen() { return gen; }, chunks, player, survival, CHUNK_PX };

@@ -14,31 +14,45 @@
   <body>
     <canvas id="game"></canvas>
 
-    <div id="info" class="panel"></div>
+    <div id="hud"></div>
 
-    <div id="panel" class="panel">
-      <label>Seed</label>
-      <div class="row">
-        <input id="seed" type="text" spellcheck="false" />
-        <button id="newWorld">Load</button>
-        <button id="randomWorld" title="Random seed">🎲</button>
+    <!-- Debug / world tools: toggled with F3 or the gear button. -->
+    <div id="debug" class="hidden">
+      <div class="debug-col">
+        <div id="info" class="panel"></div>
+        <div id="panel" class="panel">
+          <label>Seed</label>
+          <div class="row">
+            <input id="seed" type="text" spellcheck="false" />
+            <button id="newWorld">Load</button>
+            <button id="randomWorld" title="Random seed">🎲</button>
+          </div>
+          <label>Teleport (tile X / Y)</label>
+          <div class="row">
+            <input id="tx" type="number" placeholder="X" />
+            <input id="ty" type="number" placeholder="Y" />
+            <button id="go">Go</button>
+          </div>
+          <label>Character (C)</label>
+          <div class="row">
+            <button id="character" class="wide"></button>
+          </div>
+        </div>
       </div>
-      <label>Teleport (tile X / Y)</label>
-      <div class="row">
-        <input id="tx" type="number" placeholder="X" />
-        <input id="ty" type="number" placeholder="Y" />
-        <button id="go">Go</button>
-      </div>
-      <label>Character (C)</label>
-      <div class="row">
-        <button id="character" class="wide"></button>
+      <canvas id="minimap" width="128" height="128"></canvas>
+      <div id="help" class="panel">
+        WASD / arrows move · Shift or boot button: run · C switch character · J journal · F3 this panel ·
+        F explore mode (fast, no collision) · + / − zoom · M minimap · hover objects to see resources
       </div>
     </div>
 
-    <canvas id="minimap" width="128" height="128"></canvas>
-
-    <div id="help" class="panel">
-      WASD / arrows move · Shift run · C switch character · F explore mode (fast, no collision) · + / − zoom · M minimap · hover objects to see resources
+    <!-- Journal: survival stats, like the original's Stats tab. -->
+    <div id="journal" class="hidden">
+      <div class="journal-tab">Stats</div>
+      <div class="journal-body">
+        <table id="journalStats"></table>
+        <div class="journal-hint">J or click to close</div>
+      </div>
     </div>
 
     <div id="tooltip" class="panel"></div>
