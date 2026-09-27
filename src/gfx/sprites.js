@@ -390,6 +390,7 @@ const SWORD_CHARS = 'EFJKL';
  * neighbouring pixels so no gaps are left.
  */
 function unarmedGrid(data) {
+  const grip = findGrip(data);
   const { w, h } = HERO;
   const grid = [];
   for (let y = 0; y < h; y++) grid.push(data.slice(y * w, y * w + w).split(''));
@@ -403,6 +404,7 @@ function unarmedGrid(data) {
     }
   }
   const at = (x, y) => (x >= 0 && y >= 0 && x < w && y < h ? grid[y][x] : '.');
+  const isHole = new Set(holes.map(([x, y]) => y * w + x));
   for (let pass = 0; pass < 3; pass++) {
     for (const [x, y] of holes) {
       if (grid[y][x] !== '.') continue;
@@ -414,7 +416,115 @@ function unarmedGrid(data) {
       else if (u !== '.' && d !== '.') grid[y][x] = u;
     }
   }
+  // Wider gaps (a blade lying across a leg) are filled when the body shows on
+  // both sides of the run: each half copies the pixel on its side.
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (grid[y][x] !== '.' || !isHole.has(y * w + x) || at(x - 1, y) === '.') continue;
+      let end = x;
+      while (end < w && grid[y][end] === '.' && isHole.has(y * w + end)) end++;
+      if (at(end, y) === '.') continue;
+      const mid = (x + end) / 2;
+      for (let i = x; i < end; i++) grid[y][i] = i < mid ? grid[y][x - 1] : grid[y][end];
+    }
+  }
+  if (grip) drawFist(grid, grip, eyeRowOf(data));
   return grid;
+}
+
+const SKIN_CHARS = '*+,3B';
+const FIST_OUTLINE = '-';
+// Fallback fist when the other hand is hidden behind the body: 2x2, lit on top.
+const DEFAULT_FIST = [[0, 0, '*'], [1, 0, '+'], [0, 1, '+'], [1, 1, ',']];
+
+/** Row of the eyes (lowest one), or 0 when the face is not visible. */
+function eyeRowOf(data) {
+  let row = 0;
+  for (let i = 0; i < data.length; i++) if (EYE_CHARS.includes(data[i])) row = Math.floor(i / HERO.w);
+  return row;
+}
+
+/**
+ * Where the hand held the sword: between the top of the hilt and the end of the
+ * arm (the nearest skin below the face), or the hilt alone if no arm is close.
+ */
+function findGrip(data) {
+  const { w, h } = HERO;
+  let hilt = null;
+  for (let i = 0; i < w * h && !hilt; i++) if (SWORD_CHARS.includes(data[i])) hilt = [i % w, Math.floor(i / w)];
+  if (!hilt) return null;
+  let arm = null;
+  let best = 4;
+  for (let y = eyeRowOf(data) + 3; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!'*+,3'.includes(data[y * w + x])) continue;
+      const d = Math.max(Math.abs(x - hilt[0]), Math.abs(y - hilt[1]));
+      if (d < best) {
+        best = d;
+        arm = [x, y];
+      }
+    }
+  }
+  return arm ? [Math.round((hilt[0] + arm[0]) / 2), Math.round((hilt[1] + arm[1]) / 2)] : hilt;
+}
+
+/**
+ * The free hand in this frame, as [dx, dy, char] cells relative to its bottom
+ * left: the lowest three rows of the biggest patch of skin below the face that
+ * is not the sword arm. Null when that hand is hidden behind the body.
+ */
+function freeHand(grid, [gx, gy], eyeRow) {
+  const { w, h } = HERO;
+  const seen = new Set();
+  let hand = null;
+  for (let y = eyeRow + 3; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (seen.has(y * w + x) || !SKIN_CHARS.includes(grid[y][x])) continue;
+      const cells = [];
+      const stack = [[x, y]];
+      seen.add(y * w + x);
+      while (stack.length) {
+        const [cx, cy] = stack.pop();
+        cells.push([cx, cy]);
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx < 0 || nx >= w || ny <= eyeRow + 2 || ny >= h || seen.has(ny * w + nx)) continue;
+          if (!SKIN_CHARS.includes(grid[ny][nx])) continue;
+          seen.add(ny * w + nx);
+          stack.push([nx, ny]);
+        }
+      }
+      const nearGrip = cells.some(([cx, cy]) => Math.max(Math.abs(cx - gx), Math.abs(cy - gy)) <= 2);
+      if (!nearGrip && cells.length >= 3 && (!hand || cells.length > hand.length)) hand = cells;
+    }
+  }
+  if (!hand) return null;
+  const bottom = Math.max(...hand.map(([, y]) => y));
+  const lower = hand.filter(([, y]) => y > bottom - 3);
+  const left = Math.min(...lower.map(([x]) => x));
+  return lower.map(([x, y]) => [x - left, y - bottom, grid[y][x]]);
+}
+
+/** Draw a copy of the free hand (or a plain fist) at the grip, in front of the body, with a dark rim. */
+function drawFist(grid, grip, eyeRow) {
+  const { w, h } = HERO;
+  const [gx, gy] = grip;
+  const shape = freeHand(grid, grip, eyeRow) ?? DEFAULT_FIST.map(([dx, dy, ch]) => [dx, dy - 1, ch]);
+  const width = Math.max(...shape.map(([dx]) => dx)) + 1;
+  const ox = gx - Math.ceil(width / 2); // centred on the grip
+  const oy = gy + 1; // bottom row of the hand
+  const cells = shape.map(([dx, dy, ch]) => [ox + dx, oy + dy, ch]);
+  const inFist = (x, y) => cells.some(([cx, cy]) => cx === x && cy === y);
+  for (const [x, y] of cells) {
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h || inFist(nx, ny)) continue;
+      if (grid[ny][nx] === '.') grid[ny][nx] = FIST_OUTLINE;
+    }
+  }
+  for (const [x, y, ch] of cells) if (x >= 0 && y >= 0 && x < w && y < h) grid[y][x] = ch;
 }
 
 function heroFrame(data) {
