@@ -562,8 +562,8 @@ function mirrorArms(grid, src, swordLeft) {
   if (!belt || !srcBelt) return;
   const dy = belt.top - srcBelt.top;
   const outside = (x, b) => (swordLeft ? x < b.x0 : x > b.x1);
-  const y0 = belt.top - 5;
-  const y1 = belt.top + 3;
+  const y0 = Math.max(0, belt.top - 6);
+  const y1 = Math.min(h - 1, belt.top + 5);
   // Clear the sword arm...
   for (let y = y0; y <= y1; y++) {
     for (let x = 0; x < w; x++) if (outside(x, belt) && !KEEP_CHARS.includes(grid[y][x])) grid[y][x] = '.';
@@ -622,7 +622,7 @@ function frameGrid(anim, dir, i) {
   const belt = beltOf(grid);
   if (!grip || !belt) return grid;
   const n = frames[dir].length;
-  const src = anim === 'idle' ? grid : swordlessGrid(frames[dir][(i + Math.floor(n / 2)) % n]);
+  const src = anim === 'walk' ? swordlessGrid(frames[dir][(i + Math.floor(n / 2)) % n]) : grid;
   mirrorArms(grid, src.map((row) => [...row]), grip[0] * 2 < belt.x0 + belt.x1);
   return grid;
 }
