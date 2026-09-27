@@ -863,8 +863,12 @@ export function buildSprites() {
   // Character frames are named <character>_<anim>_<dir>_<i>, e.g. soldier_walk_left_3.
   for (const [anim, a] of Object.entries(HERO.anims)) {
     for (const [dir, frames] of Object.entries(a.frames)) {
+      // Idle facing up only has 4 of its 12 frames drawn, and frames 1-3 are a
+      // different pose (sword arm raised). The front idle keeps the body still
+      // and only blinks, so the back idle holds its first frame.
+      const still = anim === 'idle' && dir === 'up';
       frames.forEach((_, i) => {
-        const grid = frameGrid(anim, dir, i);
+        const grid = frameGrid(anim, dir, still ? 0 : i);
         sprites[`swordsman_${anim}_${dir}_${i}`] = heroFrame(grid);
         sprites[`soldier_${anim}_${dir}_${i}`] = soldierFrame(grid);
       });
