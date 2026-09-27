@@ -385,12 +385,21 @@ const HEAD_CHARS = `${HAIR_CHARS},+*B3-/012`; // hair, skin and eyes
 const SWORD_CHARS = 'EFJKL';
 
 /**
- * Decode a frame into a grid of palette characters with the sword removed.
- * Where the blade crossed in front of the body, the hole is filled from the
- * neighbouring pixels so no gaps are left.
+ * Decode a frame into a grid of palette characters with the sword removed and
+ * `hand` (cells from swordHand) drawn where it was held.
  */
-function unarmedGrid(data) {
+function unarmedGrid(data, hand) {
+  const grid = swordlessGrid(data);
   const grip = findGrip(data);
+  if (grip && hand) drawFist(grid, grip, hand);
+  return grid;
+}
+
+/**
+ * The frame's grid with the sword taken out. Where the blade crossed in front
+ * of the body, the hole is filled from the neighbouring pixels so no gaps are left.
+ */
+function swordlessGrid(data) {
   const { w, h } = HERO;
   const grid = [];
   for (let y = 0; y < h; y++) grid.push(data.slice(y * w, y * w + w).split(''));
@@ -428,14 +437,11 @@ function unarmedGrid(data) {
       for (let i = x; i < end; i++) grid[y][i] = i < mid ? grid[y][x - 1] : grid[y][end];
     }
   }
-  if (grip) drawFist(grid, grip, eyeRowOf(data));
   return grid;
 }
 
 const SKIN_CHARS = '*+,3B';
 const FIST_OUTLINE = '-';
-// Fallback fist when the other hand is hidden behind the body: 2x2, lit on top.
-const DEFAULT_FIST = [[0, 0, '*'], [1, 0, '+'], [0, 1, '+'], [1, 1, ',']];
 
 /** Row of the eyes (lowest one), or 0 when the face is not visible. */
 function eyeRowOf(data) {
@@ -469,8 +475,8 @@ function findGrip(data) {
 }
 
 /**
- * The free hand in this frame, as [dx, dy, char] cells relative to its bottom
- * left: the lowest three rows of the biggest patch of skin below the face that
+ * The free hand in this frame: `cells` as [dx, dy, char] relative to its
+ * bottom left corner (`left`, `bottom`), taken from the lowest three rows of the biggest patch of skin below the face that
  * is not the sword arm. Null when that hand is hidden behind the body.
  */
 function freeHand(grid, [gx, gy], eyeRow) {
@@ -503,18 +509,130 @@ function freeHand(grid, [gx, gy], eyeRow) {
   const bottom = Math.max(...hand.map(([, y]) => y));
   const lower = hand.filter(([, y]) => y > bottom - 3);
   const left = Math.min(...lower.map(([x]) => x));
-  return lower.map(([x, y]) => [x - left, y - bottom, grid[y][x]]);
+  // A thin sliver is the edge of an arm, not a whole hand.
+  if (lower.length < 4 || Math.max(...lower.map(([x]) => x)) === left) return null;
+  return { cells: lower.map(([x, y]) => [x - left, y - bottom, grid[y][x]]), left, bottom };
 }
 
-/** Draw a copy of the free hand (or a plain fist) at the grip, in front of the body, with a dark rim. */
-function drawFist(grid, grip, eyeRow) {
+const handWidth = (cells) => Math.max(...cells.map(([dx]) => dx)) + 1;
+
+/** The free hand of a frame (see freeHand), or null if it is hidden. */
+function spareHand(data) {
+  const grip = findGrip(data);
+  return grip && freeHand(swordlessGrid(data), grip, eyeRowOf(data));
+}
+
+/**
+ * The sword hand for a left-facing frame: a copy of that frame's free hand, or
+ * the idle pose's free hand when this frame's is hidden.
+ */
+function swordHand(anim, i) {
+  return spareHand(HERO.anims[anim].frames.left[i]) ?? spareHand(HERO.anims.idle.frames.left[0]);
+}
+
+const BELT = 'C';
+// Legs, boots, belt and hair are never moved when the arms are mirrored.
+const KEEP_CHARS = `GTWPHIRMNQSVUXYDC${HAIR_CHARS}`;
+
+/** The belt's row and column range in a grid, or null if it is not visible. */
+function beltOf(grid) {
+  let top = null;
+  let x0 = HERO.w;
+  let x1 = -1;
+  grid.forEach((row, y) => row.forEach((ch, x) => {
+    if (ch !== BELT) return;
+    top ??= y;
+    x0 = Math.min(x0, x);
+    x1 = Math.max(x1, x);
+  }));
+  return top === null ? null : { top, x0, x1 };
+}
+
+/**
+ * Facing down or up both arms show, so the sword arm is replaced by a mirror
+ * image of the free arm (sleeve and hand) from `src`, reflected across the
+ * belt. `src` is this frame when standing still, and the frame half a step
+ * away when moving so the arms swing in turn. `swordLeft` says which side the
+ * sword was held on.
+ */
+function mirrorArms(grid, src, swordLeft) {
   const { w, h } = HERO;
-  const [gx, gy] = grip;
-  const shape = freeHand(grid, grip, eyeRow) ?? DEFAULT_FIST.map(([dx, dy, ch]) => [dx, dy - 1, ch]);
-  const width = Math.max(...shape.map(([dx]) => dx)) + 1;
-  const ox = gx - Math.ceil(width / 2); // centred on the grip
+  const belt = beltOf(grid);
+  const srcBelt = beltOf(src);
+  if (!belt || !srcBelt) return;
+  const dy = belt.top - srcBelt.top;
+  const outside = (x, b) => (swordLeft ? x < b.x0 : x > b.x1);
+  const y0 = belt.top - 5;
+  const y1 = belt.top + 3;
+  // Clear the sword arm...
+  for (let y = y0; y <= y1; y++) {
+    for (let x = 0; x < w; x++) if (outside(x, belt) && !KEEP_CHARS.includes(grid[y][x])) grid[y][x] = '.';
+  }
+  // ...and draw the free arm reflected in its place.
+  for (let sy = y0 - dy; sy <= y1 - dy; sy++) {
+    if (sy < 0 || sy >= h) continue;
+    for (let sx = 0; sx < w; sx++) {
+      const ch = src[sy][sx];
+      const free = swordLeft ? sx > srcBelt.x1 : sx < srcBelt.x0;
+      if (!free || ch === '.' || KEEP_CHARS.includes(ch)) continue;
+      const x = srcBelt.x0 + srcBelt.x1 - sx + (belt.x0 + belt.x1 - srcBelt.x0 - srcBelt.x1) / 2;
+      const dx = Math.round(x);
+      const y = sy + dy;
+      if (dx >= 0 && dx < w && y >= 0 && y < h && grid[y][dx] === '.') grid[y][dx] = ch;
+    }
+  }
+}
+
+let rightShiftCache = null;
+
+/**
+ * Columns to move mirrored left-facing frames so the body stands where the
+ * original right-facing art had it (measured once, on the idle pose, so every
+ * frame moves the same amount).
+ */
+function rightShift() {
+  if (rightShiftCache === null) {
+    const want = beltOf(swordlessGrid(HERO.anims.idle.frames.right[0]));
+    const got = beltOf(swordlessGrid(HERO.anims.idle.frames.left[0]).map((row) => [...row].reverse()));
+    rightShiftCache = want && got ? Math.round((want.x0 + want.x1 - got.x0 - got.x1) / 2) : 0;
+  }
+  return rightShiftCache;
+}
+
+/**
+ * The swordless grid for a frame, with the sword hand redrawn:
+ * - left: a copy of the free hand at the grip;
+ * - right: the matching left-facing frame, mirrored, so both views match;
+ * - down / up: the free arm mirrored onto the sword side.
+ */
+function frameGrid(anim, dir, i) {
+  const { w } = HERO;
+  const frames = HERO.anims[anim].frames;
+  if (dir === 'right') {
+    const shift = rightShift();
+    return frameGrid(anim, 'left', i).map((row) => {
+      const flipped = [...row].reverse();
+      return flipped.map((_, x) => flipped[x - shift] ?? '.');
+    });
+  }
+  if (dir === 'left') return unarmedGrid(frames.left[i], swordHand(anim, i));
+  const data = frames[dir][i];
+  const grid = swordlessGrid(data);
+  const grip = findGrip(data);
+  const belt = beltOf(grid);
+  if (!grip || !belt) return grid;
+  const n = frames[dir].length;
+  const src = anim === 'idle' ? grid : swordlessGrid(frames[dir][(i + Math.floor(n / 2)) % n]);
+  mirrorArms(grid, src.map((row) => [...row]), grip[0] * 2 < belt.x0 + belt.x1);
+  return grid;
+}
+
+/** Draw the sword hand (from swordHand) in front of the body, with a dark rim. */
+function drawFist(grid, [gx, gy], hand) {
+  const { w, h } = HERO;
+  const ox = gx - Math.ceil(handWidth(hand.cells) / 2); // centred on the grip
   const oy = gy + 1; // bottom row of the hand
-  const cells = shape.map(([dx, dy, ch]) => [ox + dx, oy + dy, ch]);
+  const cells = hand.cells.map(([dx, dy, ch]) => [ox + dx, oy + dy, ch]);
   const inFist = (x, y) => cells.some(([cx, cy]) => cx === x && cy === y);
   for (const [x, y] of cells) {
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
@@ -527,8 +645,7 @@ function drawFist(grid, grip, eyeRow) {
   for (const [x, y, ch] of cells) if (x >= 0 && y >= 0 && x < w && y < h) grid[y][x] = ch;
 }
 
-function heroFrame(data) {
-  const grid = unarmedGrid(data);
+function heroFrame(grid) {
   const pix = new Pix(HERO.w, HERO.h);
   grid.forEach((row, y) => row.forEach((ch, x) => ch !== '.' && pix.set(x, y, HERO_RGB[ch])));
   return pix.toCanvas();
@@ -594,9 +711,8 @@ function camoColor(ch, x, y) {
 const HELMET = ['#2a3120', '#3a4429', '#4b5634', '#5d6a40', '#71804f'].map(rgb);
 const HELMET_OUTLINE = rgb('#171a12');
 
-function soldierFrame(data) {
+function soldierFrame(grid) {
   const { w, h } = HERO;
-  const grid = unarmedGrid(data);
 
   // Find the hair and the eyes in this frame.
   let hairTop = h;
@@ -747,9 +863,10 @@ export function buildSprites() {
   // Character frames are named <character>_<anim>_<dir>_<i>, e.g. soldier_walk_left_3.
   for (const [anim, a] of Object.entries(HERO.anims)) {
     for (const [dir, frames] of Object.entries(a.frames)) {
-      frames.forEach((data, i) => {
-        sprites[`swordsman_${anim}_${dir}_${i}`] = heroFrame(data);
-        sprites[`soldier_${anim}_${dir}_${i}`] = soldierFrame(data);
+      frames.forEach((_, i) => {
+        const grid = frameGrid(anim, dir, i);
+        sprites[`swordsman_${anim}_${dir}_${i}`] = heroFrame(grid);
+        sprites[`soldier_${anim}_${dir}_${i}`] = soldierFrame(grid);
       });
     }
   }
