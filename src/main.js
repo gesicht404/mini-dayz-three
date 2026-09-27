@@ -11,6 +11,7 @@ import { OBJECTS } from "./world/objects.js";
 import { seedFromText } from "./world/rng.js";
 import { buildSprites, CHARACTERS } from "./gfx/sprites.js";
 import { biomeColor } from "./gfx/ground.js";
+import { FogMemory, FOG_COLOR } from "./world/fog.js";
 import { Player } from "./player.js";
 import { Survival } from "./survival.js";
 import { Hud } from "./hud.js";
@@ -144,6 +145,18 @@ const player = new Player(
 );
 const survival = new Survival();
 const inventory = new Inventory();
+// Fog of war: which tiles have been seen (saved per seed), for the minimap.
+let storage = null;
+try {
+  storage = window.localStorage;
+} catch {
+  // storage unavailable: fog is remembered for this visit only
+}
+const fog = new FogMemory(storage ?? { getItem: () => null, setItem() {} });
+window.addEventListener("pagehide", () => fog.save());
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) fog.save();
+});
 let runToggle = false; // the boot button: run without holding Shift
 
 /** Nearest free spot to a point, searching outwards in a spiral. */
@@ -176,6 +189,7 @@ function startWorld(text, x = 0, y = 0) {
   chunks.update(player.x, player.y, viewW, viewH, 0, true);
   survival.reset(); // a new world is a new game
   inventory.reset(gen.seed);
+  fog.load(seedText);
   inventory.playerPos = { x: player.x, y: player.y };
   ui.seed.value = seedText;
   document.activeElement?.blur(); // give the keyboard back to the game
@@ -418,11 +432,14 @@ function drawMinimap() {
   const cache = {};
   for (let j = 0; j < MM_SIZE; j++) {
     for (let i = 0; i < MM_SIZE; i++) {
-      const b = gen.biomeAt(
-        player.x + (i - MM_SIZE / 2) * MM_STEP,
-        player.y - (j - MM_SIZE / 2) * MM_STEP,
-      );
-      const c = (cache[b] ??= parseInt(biomeColor(b).slice(1), 16));
+      const x = player.x + (i - MM_SIZE / 2) * MM_STEP;
+      const y = player.y - (j - MM_SIZE / 2) * MM_STEP;
+      // Unexplored land stays dark, like a map you fill in as you go.
+      let c = FOG_COLOR;
+      if (fog.isExplored(x, y)) {
+        const b = gen.biomeAt(x, y);
+        c = cache[b] ??= parseInt(biomeColor(b).slice(1), 16);
+      }
       const k = (j * MM_SIZE + i) * 4;
       img.data[k] = (c >> 16) & 255;
       img.data[k + 1] = (c >> 8) & 255;
@@ -434,7 +451,7 @@ function drawMinimap() {
   // Points of interest from loaded chunks
   for (const c of chunks.chunks.values()) {
     for (const o of c.data.objects) {
-      if (o.resource !== "loot") continue;
+      if (o.resource !== "loot" || !fog.isExplored(o.x, o.y)) continue;
       const i = MM_SIZE / 2 + (o.x - player.x) / MM_STEP;
       const j = MM_SIZE / 2 - (o.y - player.y) / MM_STEP;
       mm.fillStyle = "#e0b040";
@@ -494,6 +511,9 @@ function frame(now) {
   const camX = Math.round(player.x);
   const camY = Math.round(player.y);
   camera.position.set(camX, camY, -camY + 1500);
+  // Everything on screen counts as explored, for the minimap.
+  fog.reveal(camX, camY, viewW / 2, viewH / 2);
+  fog.maybeSave();
   renderer.render(scene, camera);
 
   frames++;
@@ -533,5 +553,6 @@ window.game = {
   player,
   survival,
   inventory,
+  fog,
   CHUNK_PX,
 };

@@ -29,19 +29,19 @@ export class WorldGenerator {
     const tx = x / TILE;
     const ty = y / TILE;
     // Small wobble so biome borders look organic instead of smooth blobs.
-    const jx = this.detail.noise(tx / 3, ty / 3) * 0.6;
-    const jy = this.detail.noise(ty / 3 + 91, tx / 3 - 37) * 0.6;
+    const jx = this.detail.noise(tx / 5, ty / 5) * 0.6;
+    const jy = this.detail.noise(ty / 5 + 91, tx / 5 - 37) * 0.6;
     const sx = tx + jx;
     const sy = ty + jy;
 
-    const e = this.elevation.fbm(sx / 90, sy / 90, 4);
-    const m = this.moisture.fbm(sx / 120, sy / 120, 3);
-    const f = this.forest.fbm(sx / 45, sy / 45, 3);
+    const e = this.elevation.fbm(sx / 140, sy / 140, 4);
+    const m = this.moisture.fbm(sx / 180, sy / 180, 3);
+    const f = this.forest.fbm(sx / 100, sy / 100, 3);
 
     // Roads follow the zero line of a domain-warped noise field.
     const wx = this.warp.noise(sx / 60, sy / 60) * 8;
     const wy = this.warp.noise(sy / 60 + 50, sx / 60 - 50) * 8;
-    const r = Math.abs(this.road.noise((sx + wx) / 160, (sy + wy) / 160));
+    const r = Math.abs(this.road.noise((sx + wx) / 220, (sy + wy) / 220));
 
     return { e, m, f, r };
   }
@@ -49,14 +49,15 @@ export class WorldGenerator {
   /** Biome id at a world position (in pixels). */
   biomeAt(x, y) {
     const { e, m, f, r } = this.climate(x, y);
-    if (e < -0.38) return BIOME.DEEP_WATER;
+    if (e < -0.4) return BIOME.DEEP_WATER;
     if (e < -0.28) return BIOME.WATER;
-    if (e < -0.24) return BIOME.SHORE;
-    if (r < 0.022) return BIOME.ROAD;
-    if (e > 0.34) return BIOME.ROCKY;
-    if (m > 0.22 && e < -0.05) return BIOME.SWAMP;
-    if (f > 0.06) return e > 0.12 ? BIOME.PINE : BIOME.FOREST;
-    if (f < -0.22 && m < -0.05) return BIOME.FIELD;
+    if (e < -0.22) return BIOME.SHORE;
+    if (r < 0.015) return BIOME.ROAD;
+    if (e > 0.38) return BIOME.ROCKY;
+    if (m > 0.25 && e < -0.02) return BIOME.SWAMP;
+    if (f > 0.12 && e > 0.1) return BIOME.PINE;
+    if (f > 0.08) return BIOME.FOREST;
+    if (f < -0.2 && m < -0.05) return BIOME.FIELD;
     return BIOME.MEADOW;
   }
 
@@ -107,7 +108,7 @@ export class WorldGenerator {
         if (biome === BIOME.FOREST || biome === BIOME.PINE) {
           // Thicker in the middle of forests, clearings near the edges.
           const { f } = this.climate(ox + px, oy + py);
-          density *= Math.min(1.3, 0.35 + (f - 0.06) * 6);
+          density *= Math.min(1.3, 0.35 + (f - 0.08) * 6);
         }
         if (rng() >= density) continue;
 

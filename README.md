@@ -27,6 +27,12 @@ thoughts above the player. Water and food drain over time (faster when running),
 health drops when starving, dehydrated or freezing, and the day/night clock
 runs one game minute per real second.
 
+## Fog of war
+
+The minimap only shows ground that has been on your screen; the rest stays
+dark until you explore it (zooming out reveals more). Explored ground is saved per seed
+in the browser.
+
 ## Inventory
 
 Like Mini DayZ: **Vicinity** on the left lists what's near you (berries from
@@ -49,6 +55,7 @@ heat raises your temperature. You start with a T-shirt (berries) and jeans
 - `src/world/objects.js`: world objects, their resources, biome spawn tables
 - `src/world/generator.js`: biomes and chunk contents (pure, no rendering)
 - `src/world/chunks.js`: loads/unloads chunks around the player and builds meshes
+- `src/world/fog.js`: fog of war for the minimap (which tiles you've seen, saved per seed)
 - `src/gfx/sprites.js`: pixel art drawn in code, packed into one atlas
 - `src/gfx/hero-data.js`: the player's frames as pixel data (generated, don't edit)
 - `tools/extract_hero.py`: regenerates `hero-data.js` from the CraftPix Swordsman sheets
