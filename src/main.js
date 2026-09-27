@@ -1,22 +1,28 @@
-import * as THREE from 'three';
-import { WorldGenerator, BIOME_NAMES, CHUNK_PX, TILE, isWaterBiome } from './world/generator.js';
-import { ChunkManager } from './world/chunks.js';
-import { OBJECTS } from './world/objects.js';
-import { seedFromText } from './world/rng.js';
-import { buildSprites, CHARACTERS } from './gfx/sprites.js';
-import { biomeColor } from './gfx/ground.js';
-import { Player } from './player.js';
-import { Survival } from './survival.js';
-import { Hud } from './hud.js';
-import { Inventory } from './inventory.js';
-import { InventoryUI } from './inventoryUI.js';
-import { isWaterBiome as isWater } from './world/biomes.js';
+import * as THREE from "three";
+import {
+  WorldGenerator,
+  BIOME_NAMES,
+  CHUNK_PX,
+  TILE,
+  isWaterBiome,
+} from "./world/generator.js";
+import { ChunkManager } from "./world/chunks.js";
+import { OBJECTS } from "./world/objects.js";
+import { seedFromText } from "./world/rng.js";
+import { buildSprites, CHARACTERS } from "./gfx/sprites.js";
+import { biomeColor } from "./gfx/ground.js";
+import { Player } from "./player.js";
+import { Survival } from "./survival.js";
+import { Hud } from "./hud.js";
+import { Inventory } from "./inventory.js";
+import { InventoryUI } from "./inventoryUI.js";
+import { isWaterBiome as isWater } from "./world/biomes.js";
 
 // ---------- Renderer & pixel-perfect camera ----------
 // The scene is rendered at low resolution, then scaled up by a whole
 // number with CSS "pixelated", so every art pixel is a crisp square.
 
-const canvas = document.getElementById('game');
+const canvas = document.getElementById("game");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
 renderer.setPixelRatio(1);
 renderer.setClearColor(0x1a1a14);
@@ -24,7 +30,13 @@ renderer.setClearColor(0x1a1a14);
 const scene = new THREE.Scene();
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 4000);
 
-let zoom = 0;
+const ZOOM_IN_MAX = 4;
+let zoom = 0; // whole-number steps added to the pixel scale; + is closer
+try {
+  zoom = Number(localStorage.getItem("zoom")) || 0;
+} catch {
+  // storage unavailable: start at the default zoom
+}
 let viewW = 0;
 let viewH = 0;
 let pixelScale = 1;
@@ -34,7 +46,9 @@ function resize() {
   const devW = window.innerWidth * dpr;
   const devH = window.innerHeight * dpr;
   // Aim for ~540 world pixels of height (2x on a 1080p screen), like Mini DayZ.
-  pixelScale = Math.max(1, Math.round(devH / 540) + zoom);
+  const baseScale = Math.round(devH / 320);
+  pixelScale = Math.max(1, Math.min(baseScale + ZOOM_IN_MAX, baseScale + zoom));
+  zoom = pixelScale - baseScale; // so a step past a limit is never a dead key press
   viewW = Math.ceil(devW / pixelScale);
   viewH = Math.ceil(devH / pixelScale);
   renderer.setSize(viewW, viewH, false);
@@ -47,19 +61,87 @@ function resize() {
   camera.updateProjectionMatrix();
   // HUD art pixels stay at a fixed size (2x on 1080p) regardless of game zoom.
   const hudScale = Math.max(2, Math.round(devH / 540));
-  document.documentElement.style.setProperty('--u', `${hudScale / dpr}px`);
+  document.documentElement.style.setProperty("--u", `${hudScale / dpr}px`);
 }
-window.addEventListener('resize', resize);
+window.addEventListener("resize", resize);
 resize();
+
+function zoomBy(step) {
+  const before = zoom;
+  zoom += step;
+  resize();
+  if (zoom === before) return;
+  try {
+    localStorage.setItem("zoom", zoom);
+  } catch {
+    // not remembered, that's fine
+  }
+}
+
+// Mouse wheel, and trackpad pinch (which arrives as ctrl + wheel). Deltas are
+// summed so a trackpad's stream of tiny events still zooms one step at a time.
+let wheelSum = 0;
+canvas.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault(); // stop ctrl + wheel zooming the whole page
+    const px =
+      e.deltaMode === 1
+        ? e.deltaY * 33
+        : e.deltaMode === 2
+          ? e.deltaY * 800
+          : e.deltaY;
+    wheelSum += e.ctrlKey ? px * 5 : px;
+    if (Math.abs(wheelSum) >= 100) {
+      zoomBy(wheelSum < 0 ? 1 : -1);
+      wheelSum = 0;
+    }
+  },
+  { passive: false },
+);
+
+// Two-finger pinch on touch screens: one step per 25% change in finger distance.
+const touches = new Map();
+let pinchDist = 0;
+const fingerDist = () => {
+  const [a, b] = touches.values();
+  return Math.hypot(a.x - b.x, a.y - b.y);
+};
+canvas.addEventListener("pointerdown", (e) => {
+  if (e.pointerType !== "touch") return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size === 2) pinchDist = fingerDist();
+});
+canvas.addEventListener("pointermove", (e) => {
+  if (!touches.has(e.pointerId)) return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size !== 2 || !pinchDist) return;
+  const ratio = fingerDist() / pinchDist;
+  if (ratio > 1.25 || ratio < 0.8) {
+    zoomBy(ratio > 1 ? 1 : -1);
+    pinchDist = fingerDist();
+  }
+});
+for (const type of ["pointerup", "pointercancel"]) {
+  canvas.addEventListener(type, (e) => {
+    touches.delete(e.pointerId);
+    if (touches.size < 2) pinchDist = 0;
+  });
+}
 
 // ---------- World ----------
 
 const sprites = buildSprites();
 const params = new URLSearchParams(location.search);
-let seedText = params.get('seed') || String(Math.floor(Math.random() * 1e9));
+let seedText = params.get("seed") || String(Math.floor(Math.random() * 1e9));
 let gen = new WorldGenerator(seedFromText(seedText));
 const chunks = new ChunkManager(scene, gen, sprites);
-const player = new Player(scene, sprites.atlas.rects, chunks.objectMat, chunks.shadowMat);
+const player = new Player(
+  scene,
+  sprites.atlas.rects,
+  chunks.objectMat,
+  chunks.shadowMat,
+);
 const survival = new Survival();
 const inventory = new Inventory();
 let runToggle = false; // the boot button: run without holding Shift
@@ -87,7 +169,7 @@ function findSpawn(x, y) {
 }
 
 function startWorld(text, x = 0, y = 0) {
-  seedText = String(text).trim() || '0';
+  seedText = String(text).trim() || "0";
   gen = new WorldGenerator(seedFromText(seedText));
   chunks.setGenerator(gen);
   [player.x, player.y] = findSpawn(x, y);
@@ -98,8 +180,8 @@ function startWorld(text, x = 0, y = 0) {
   ui.seed.value = seedText;
   document.activeElement?.blur(); // give the keyboard back to the game
   const url = new URL(location.href);
-  url.searchParams.set('seed', seedText);
-  history.replaceState(null, '', url);
+  url.searchParams.set("seed", seedText);
+  history.replaceState(null, "", url);
 }
 
 function teleport(tileX, tileY) {
@@ -111,44 +193,52 @@ function teleport(tileX, tileY) {
 
 const input = { up: false, down: false, left: false, right: false, run: false };
 const KEYS = {
-  KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down',
-  KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
-  ShiftLeft: 'run', ShiftRight: 'run',
+  KeyW: "up",
+  ArrowUp: "up",
+  KeyS: "down",
+  ArrowDown: "down",
+  KeyA: "left",
+  ArrowLeft: "left",
+  KeyD: "right",
+  ArrowRight: "right",
+  ShiftLeft: "run",
+  ShiftRight: "run",
 };
 
-window.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') return;
-  if (e.code === 'F3') {
+window.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT") return;
+  if (e.code === "F3") {
     e.preventDefault();
     toggleDebug();
-  } else if (e.code === 'KeyI' || e.code === 'Tab') {
+  } else if (e.code === "KeyI" || e.code === "Tab") {
     e.preventDefault();
     invUI.toggle(chunks);
-  } else if (e.code === 'Escape' && invUI.open) {
+  } else if (e.code === "Escape" && invUI.open) {
     invUI.close();
-  } else if (e.code === 'KeyJ' || (e.code === 'Escape' && !ui.journal.classList.contains('hidden'))) {
+  } else if (
+    e.code === "KeyJ" ||
+    (e.code === "Escape" && !ui.journal.classList.contains("hidden"))
+  ) {
     toggleJournal();
   } else if (KEYS[e.code]) {
     input[KEYS[e.code]] = true;
     e.preventDefault();
-  } else if (e.code === 'KeyF') {
+  } else if (e.code === "KeyF") {
     player.explore = !player.explore;
-  } else if (e.code === 'Equal' || e.code === 'NumpadAdd') {
-    zoom = Math.min(zoom + 1, 4);
-    resize();
-  } else if (e.code === 'Minus' || e.code === 'NumpadSubtract') {
-    zoom = Math.max(zoom - 1, -2);
-    resize();
-  } else if (e.code === 'KeyC') {
+  } else if (e.code === "Equal" || e.code === "NumpadAdd") {
+    zoomBy(1);
+  } else if (e.code === "Minus" || e.code === "NumpadSubtract") {
+    zoomBy(-1);
+  } else if (e.code === "KeyC") {
     cycleCharacter();
-  } else if (e.code === 'KeyM') {
-    ui.minimap.classList.toggle('hidden');
+  } else if (e.code === "KeyM") {
+    ui.minimap.classList.toggle("hidden");
   }
 });
-window.addEventListener('keyup', (e) => {
+window.addEventListener("keyup", (e) => {
   if (KEYS[e.code]) input[KEYS[e.code]] = false;
 });
-window.addEventListener('blur', () => {
+window.addEventListener("blur", () => {
   for (const k in input) input[k] = false;
 });
 
@@ -156,34 +246,44 @@ window.addEventListener('blur', () => {
 
 const $ = (id) => document.getElementById(id);
 const ui = {
-  info: $('info'),
-  seed: $('seed'),
-  tx: $('tx'),
-  ty: $('ty'),
-  tooltip: $('tooltip'),
-  minimap: $('minimap'),
-  debug: $('debug'),
-  journal: $('journal'),
-  journalStats: $('journalStats'),
+  info: $("info"),
+  seed: $("seed"),
+  tx: $("tx"),
+  ty: $("ty"),
+  tooltip: $("tooltip"),
+  minimap: $("minimap"),
+  debug: $("debug"),
+  journal: $("journal"),
+  journalStats: $("journalStats"),
 };
 
-const hud = new Hud($('hud'), sprites.atlas, {
+const hud = new Hud($("hud"), sprites.atlas, {
   settings: () => toggleDebug(),
   journal: () => toggleJournal(),
-  interact: () => survival.say('There is nothing here to use.'),
+  interact: () => survival.say("There is nothing here to use."),
   backpack: () => invUI.toggle(chunks),
   toggleRun: () => (runToggle = !runToggle),
 });
 
 /** Is there water within a couple of steps of the player? (for filling a canteen) */
 function nearWater() {
-  for (const [dx, dy] of [[0, 0], [20, 0], [-20, 0], [0, 20], [0, -20], [14, 14], [-14, 14], [14, -14], [-14, -14]]) {
+  for (const [dx, dy] of [
+    [0, 0],
+    [20, 0],
+    [-20, 0],
+    [0, 20],
+    [0, -20],
+    [14, 14],
+    [-14, 14],
+    [14, -14],
+    [-14, -14],
+  ]) {
     if (isWater(gen.biomeAt(player.x + dx, player.y + dy))) return true;
   }
   return false;
 }
 
-const invUI = new InventoryUI($('inventory'), inventory, {
+const invUI = new InventoryUI($("inventory"), inventory, {
   use: (loc) => {
     const msg = inventory.use(loc, survival, nearWater());
     if (msg) survival.say(msg);
@@ -195,40 +295,47 @@ const invUI = new InventoryUI($('inventory'), inventory, {
 });
 
 function toggleDebug() {
-  ui.debug.classList.toggle('hidden');
+  ui.debug.classList.toggle("hidden");
 }
 
 function toggleJournal() {
-  ui.journal.classList.toggle('hidden');
+  ui.journal.classList.toggle("hidden");
   updateJournal();
 }
-ui.journal.addEventListener('click', toggleJournal);
+ui.journal.addEventListener("click", toggleJournal);
 
 function updateJournal() {
-  if (ui.journal.classList.contains('hidden')) return;
+  if (ui.journal.classList.contains("hidden")) return;
   const rows = [
-    ['Score', survival.stats.score],
-    ['Minutes alive', Math.floor(survival.aliveSeconds / 60)],
-    ['Infected killed', survival.stats.infectedKilled],
-    ['Bandits killed', survival.stats.banditsKilled],
-    ['Karma', survival.stats.karma],
-    ['Days survived', survival.daysSurvived],
-    ['Character', CHARACTERS[player.character]],
+    ["Score", survival.stats.score],
+    ["Minutes alive", Math.floor(survival.aliveSeconds / 60)],
+    ["Infected killed", survival.stats.infectedKilled],
+    ["Bandits killed", survival.stats.banditsKilled],
+    ["Karma", survival.stats.karma],
+    ["Days survived", survival.daysSurvived],
+    ["Character", CHARACTERS[player.character]],
   ];
-  ui.journalStats.innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+  ui.journalStats.innerHTML = rows
+    .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`)
+    .join("");
 }
 
-$('newWorld').addEventListener('click', () => startWorld(ui.seed.value));
-$('randomWorld').addEventListener('click', () => startWorld(String(Math.floor(Math.random() * 1e9))));
-ui.seed.addEventListener('keydown', (e) => e.key === 'Enter' && startWorld(ui.seed.value));
-$('go').addEventListener('click', () => {
+$("newWorld").addEventListener("click", () => startWorld(ui.seed.value));
+$("randomWorld").addEventListener("click", () =>
+  startWorld(String(Math.floor(Math.random() * 1e9))),
+);
+ui.seed.addEventListener(
+  "keydown",
+  (e) => e.key === "Enter" && startWorld(ui.seed.value),
+);
+$("go").addEventListener("click", () => {
   const x = parseInt(ui.tx.value, 10);
   const y = parseInt(ui.ty.value, 10);
   if (Number.isFinite(x) && Number.isFinite(y)) teleport(x, y);
   document.activeElement?.blur();
 });
-for (const el of document.querySelectorAll('#panel input, #panel button')) {
-  el.addEventListener('keyup', (e) => e.key !== 'Enter' && e.stopPropagation());
+for (const el of document.querySelectorAll("#panel input, #panel button")) {
+  el.addEventListener("keyup", (e) => e.key !== "Enter" && e.stopPropagation());
 }
 
 // Character choice, remembered per browser.
@@ -237,7 +344,7 @@ function setCharacter(id) {
   ui.character.textContent = CHARACTERS[id];
   hud.setCharacter(id);
   try {
-    localStorage.setItem('character', id);
+    localStorage.setItem("character", id);
   } catch {
     // storage unavailable (private mode): the choice just isn't remembered
   }
@@ -246,22 +353,25 @@ function cycleCharacter() {
   const ids = Object.keys(CHARACTERS);
   setCharacter(ids[(ids.indexOf(player.character) + 1) % ids.length]);
 }
-ui.character = $('character');
-ui.character.addEventListener('click', () => {
+ui.character = $("character");
+ui.character.addEventListener("click", () => {
   cycleCharacter();
   ui.character.blur();
 });
 let savedCharacter = null;
 try {
-  savedCharacter = localStorage.getItem('character');
+  savedCharacter = localStorage.getItem("character");
 } catch {
   // ignore
 }
-setCharacter(CHARACTERS[savedCharacter] ? savedCharacter : 'swordsman');
+setCharacter(CHARACTERS[savedCharacter] ? savedCharacter : "swordsman");
 
 let mouse = null;
-canvas.addEventListener('mousemove', (e) => (mouse = { x: e.clientX, y: e.clientY }));
-canvas.addEventListener('mouseleave', () => (mouse = null));
+canvas.addEventListener(
+  "mousemove",
+  (e) => (mouse = { x: e.clientX, y: e.clientY }),
+);
+canvas.addEventListener("mouseleave", () => (mouse = null));
 
 function screenToWorld(sx, sy) {
   const rect = canvas.getBoundingClientRect();
@@ -275,35 +385,43 @@ function screenToWorld(sx, sy) {
 
 function updateTooltip() {
   if (!mouse) {
-    ui.tooltip.style.display = 'none';
+    ui.tooltip.style.display = "none";
     return;
   }
   const [wx, wy] = screenToWorld(mouse.x, mouse.y);
   const o = chunks.objectAt(wx, wy);
   let text = null;
-  if (o) text = `${OBJECTS[o.type].name}<br><small>${o.resource} ×${o.amount}</small>`;
-  else if (!gen.isWalkable(wx, wy)) text = 'Lake<br><small>water</small>';
+  if (o)
+    text = `${OBJECTS[o.type].name}<br><small>${o.resource} ×${o.amount}</small>`;
+  else if (!gen.isWalkable(wx, wy)) text = "Lake<br><small>water</small>";
   if (!text) {
-    ui.tooltip.style.display = 'none';
+    ui.tooltip.style.display = "none";
     return;
   }
   ui.tooltip.innerHTML = text;
-  ui.tooltip.style.display = 'block';
+  ui.tooltip.style.display = "block";
   ui.tooltip.style.left = `${mouse.x + 14}px`;
   ui.tooltip.style.top = `${mouse.y + 10}px`;
 }
 
 // Minimap: sample the generator directly, so it also shows unloaded land.
-const mm = ui.minimap.getContext('2d');
+const mm = ui.minimap.getContext("2d");
 const MM_SIZE = ui.minimap.width;
 const MM_STEP = 24; // world px per minimap pixel
 function drawMinimap() {
-  if (ui.minimap.classList.contains('hidden') || ui.debug.classList.contains('hidden')) return;
+  if (
+    ui.minimap.classList.contains("hidden") ||
+    ui.debug.classList.contains("hidden")
+  )
+    return;
   const img = mm.createImageData(MM_SIZE, MM_SIZE);
   const cache = {};
   for (let j = 0; j < MM_SIZE; j++) {
     for (let i = 0; i < MM_SIZE; i++) {
-      const b = gen.biomeAt(player.x + (i - MM_SIZE / 2) * MM_STEP, player.y - (j - MM_SIZE / 2) * MM_STEP);
+      const b = gen.biomeAt(
+        player.x + (i - MM_SIZE / 2) * MM_STEP,
+        player.y - (j - MM_SIZE / 2) * MM_STEP,
+      );
       const c = (cache[b] ??= parseInt(biomeColor(b).slice(1), 16));
       const k = (j * MM_SIZE + i) * 4;
       img.data[k] = (c >> 16) & 255;
@@ -316,14 +434,14 @@ function drawMinimap() {
   // Points of interest from loaded chunks
   for (const c of chunks.chunks.values()) {
     for (const o of c.data.objects) {
-      if (o.resource !== 'loot') continue;
+      if (o.resource !== "loot") continue;
       const i = MM_SIZE / 2 + (o.x - player.x) / MM_STEP;
       const j = MM_SIZE / 2 - (o.y - player.y) / MM_STEP;
-      mm.fillStyle = '#e0b040';
+      mm.fillStyle = "#e0b040";
       mm.fillRect(Math.round(i) - 1, Math.round(j) - 1, 3, 3);
     }
   }
-  mm.fillStyle = '#ff4030';
+  mm.fillStyle = "#ff4030";
   mm.fillRect(MM_SIZE / 2 - 1, MM_SIZE / 2 - 1, 3, 3);
 }
 
@@ -337,15 +455,19 @@ function updateInfo() {
     `Seed <b>${seedText}</b>`,
     `X <b>${tileX}</b>  Y <b>${tileY}</b>`,
     `Chunk <b>${cx}, ${cy}</b>`,
-    `Biome <b>${isWaterBiome(b) ? 'Lake' : BIOME_NAMES[b]}</b>`,
+    `Biome <b>${isWaterBiome(b) ? "Lake" : BIOME_NAMES[b]}</b>`,
     `Chunks loaded <b>${chunks.chunks.size}</b>`,
-    `FPS <b>${fps}</b>${player.explore ? '  <span class="warn">EXPLORE MODE</span>' : ''}`,
-  ].join('<br>');
+    `FPS <b>${fps}</b>${player.explore ? '  <span class="warn">EXPLORE MODE</span>' : ""}`,
+  ].join("<br>");
 }
 
 // ---------- Loop ----------
 
-startWorld(seedText, Number(params.get('x') || 0) * TILE, Number(params.get('y') || 0) * TILE);
+startWorld(
+  seedText,
+  Number(params.get("x") || 0) * TILE,
+  Number(params.get("y") || 0) * TILE,
+);
 
 let last = performance.now();
 let frames = 0;
@@ -391,7 +513,7 @@ function frame(now) {
     hud.update(survival, { running, headY });
     invUI.refresh();
     updateJournal();
-    if (!ui.debug.classList.contains('hidden')) updateInfo();
+    if (!ui.debug.classList.contains("hidden")) updateInfo();
     updateTooltip();
   }
   if (mapTime > 0.4) {
@@ -403,4 +525,13 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // Handy for debugging in the browser console.
-window.game = { get gen() { return gen; }, chunks, player, survival, inventory, CHUNK_PX };
+window.game = {
+  get gen() {
+    return gen;
+  },
+  chunks,
+  player,
+  survival,
+  inventory,
+  CHUNK_PX,
+};

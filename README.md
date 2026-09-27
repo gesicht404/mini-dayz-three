@@ -16,7 +16,7 @@ Add `?seed=12345&x=100&y=-50` to the URL to open a specific seed at a tile posit
 WASD / arrows move · Shift (or the boot button) run · I / Tab (or the backpack button) inventory ·
 C switch character · J journal ·
 F3 (or the gear button) debug panel with seed, teleport and minimap · F explore mode ·
-+ / − zoom · M minimap · hover objects to see resources
++ / − or mouse wheel / pinch: zoom · M minimap · hover objects to see resources
 
 ## HUD
 
