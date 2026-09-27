@@ -531,8 +531,8 @@ function swordHand(anim, i) {
 }
 
 const BELT = 'C';
-// Legs, boots, belt and hair are never moved when the arms are mirrored.
-const KEEP_CHARS = `GTWPHIRMNQSVUXYDC${HAIR_CHARS}`;
+// Legs, boots, belt, hair and eyes are never moved when the arms are mirrored.
+const KEEP_CHARS = `GTWPHIRMNQSVUXYDC${HAIR_CHARS}/012`;
 
 /** The belt's row and column range in a grid, or null if it is not visible. */
 function beltOf(grid) {
@@ -622,7 +622,7 @@ function frameGrid(anim, dir, i) {
   const belt = beltOf(grid);
   if (!grip || !belt) return grid;
   const n = frames[dir].length;
-  const src = anim === 'walk' ? swordlessGrid(frames[dir][(i + Math.floor(n / 2)) % n]) : grid;
+  const src = anim === 'idle' ? grid : swordlessGrid(frames[dir][(i + Math.floor(n / 2)) % n]);
   mirrorArms(grid, src.map((row) => [...row]), grip[0] * 2 < belt.x0 + belt.x1);
   return grid;
 }
@@ -711,10 +711,16 @@ function camoColor(ch, x, y) {
 const HELMET = ['#2a3120', '#3a4429', '#4b5634', '#5d6a40', '#71804f'].map(rgb);
 const HELMET_OUTLINE = rgb('#171a12');
 
-function soldierFrame(grid) {
-  const { w, h } = HERO;
+const HELMET_ROWS = 6; // dome height including the brim row
 
-  // Find the hair and the eyes in this frame.
+/**
+ * Where the helmet goes in a frame: the brim row (two above the eyes, or below
+ * the top of the hair from behind) and the skull's centre and half width at
+ * forehead level. The spiky hair is ignored: it sticks out to one side and
+ * changes shape from frame to frame. Null when no hair is visible.
+ */
+function helmetFit(grid) {
+  const { w, h } = HERO;
   let hairTop = h;
   let eyeRow = null;
   for (let y = 0; y < h; y++) {
@@ -723,25 +729,8 @@ function soldierFrame(grid) {
       if (eyeRow === null && EYE_CHARS.includes(grid[y][x])) eyeRow = y;
     }
   }
-
-  // Helmet dome from just under the hair spikes down to the brim.
-  const HELMET_ROWS = 6; // dome height including the brim row
+  if (hairTop === h) return null;
   const brim = eyeRow !== null ? eyeRow - 2 : hairTop + 8;
-  const top = Math.max(hairTop, brim - HELMET_ROWS + 1);
-
-  // Body: camo uniform; hair spikes above the helmet are dropped.
-  const pix = new Pix(w, h);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const ch = grid[y][x];
-      if (ch === '.' || (y < top && HAIR_CHARS.includes(ch))) continue;
-      pix.set(x, y, CAMO_CHARS.includes(ch) ? camoColor(ch, x, y) : SOLDIER_RGB[ch]);
-    }
-  }
-  if (hairTop === h) return pix.toCanvas();
-
-  // Centre and width come from the skull at forehead level (the brim row and
-  // two rows below), not the whole hairstyle: the spikes stick out to one side.
   let x0 = w;
   let x1 = -1;
   for (let y = brim; y <= Math.min(h - 1, brim + 2); y++) {
@@ -752,8 +741,31 @@ function soldierFrame(grid) {
       }
     }
   }
-  const cx = (x0 + x1 + 1) / 2;
-  const rx = (x1 - x0 + 1) / 2 - 1; // a bit narrower than the skull so it hugs the head
+  return { brim, cx: (x0 + x1 + 1) / 2, rx: (x1 - x0 + 1) / 2 - 1 }; // a bit narrower than the skull so it hugs the head
+}
+
+/**
+ * `helmetRx` fixes the helmet's half width, so it keeps one size through an
+ * animation instead of following the hair.
+ */
+function soldierFrame(grid, helmetRx) {
+  const { w, h } = HERO;
+  const fit = helmetFit(grid);
+  const brim = fit ? fit.brim : 0;
+  const top = brim - HELMET_ROWS + 1;
+
+  // Body: camo uniform; hair spikes above the helmet are dropped.
+  const pix = new Pix(w, h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const ch = grid[y][x];
+      if (ch === '.' || (fit && y < top && HAIR_CHARS.includes(ch))) continue;
+      pix.set(x, y, CAMO_CHARS.includes(ch) ? camoColor(ch, x, y) : SOLDIER_RGB[ch]);
+    }
+  }
+  if (!fit) return pix.toCanvas();
+  const { cx } = fit;
+  const rx = helmetRx ?? fit.rx;
 
   // Helmet on top: an upper half-ellipse plus a wider brim row.
   const helmet = new Set();
@@ -770,7 +782,7 @@ function soldierFrame(grid) {
     }
   }
   // Remove leftover hair next to the helmet, then outline the helmet.
-  for (let y = top; y <= brim; y++) {
+  for (let y = Math.max(0, top); y <= brim; y++) {
     for (let x = 0; x < w; x++) {
       if (!helmet.has(y * w + x) && HAIR_CHARS.includes(grid[y][x])) pix.px[y * w + x] = null;
     }
@@ -867,10 +879,12 @@ export function buildSprites() {
       // different pose (sword arm raised). The front idle keeps the body still
       // and only blinks, so the back idle holds its first frame.
       const still = anim === 'idle' && dir === 'up';
+      // One helmet size per direction, taken from the standing pose.
+      const helmetRx = helmetFit(frameGrid('idle', dir, 0))?.rx;
       frames.forEach((_, i) => {
         const grid = frameGrid(anim, dir, still ? 0 : i);
         sprites[`swordsman_${anim}_${dir}_${i}`] = heroFrame(grid);
-        sprites[`soldier_${anim}_${dir}_${i}`] = soldierFrame(grid);
+        sprites[`soldier_${anim}_${dir}_${i}`] = soldierFrame(grid, helmetRx);
       });
     }
   }
