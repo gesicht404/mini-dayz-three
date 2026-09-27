@@ -105,10 +105,6 @@ button {
   background: #4a3b28;
 }
 
-button.wide {
-  flex: 1;
-}
-
 button:hover {
   background: #5e4c34;
 }

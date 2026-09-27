@@ -1,5 +1,4 @@
 # server.js is only the local dev server. If Vercel sees it, it deploys the
 # project as a Node function instead of serving the static files.
 server.js
-tools/
 .claude/

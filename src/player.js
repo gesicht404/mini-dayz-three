@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PLAYER_FEET_OFFSET, HERO_ANIMS } from './gfx/sprites.js';
+import { PLAYER_FEET_OFFSET } from './gfx/sprites.js';
 
 const WALK_SPEED = 55; // px per second
 const RUN_SPEED = 100;
@@ -7,18 +7,19 @@ const EXPLORE_SPEED = 600; // debug fly mode, ignores collisions
 const RADIUS = 4;
 
 export class Player {
-  constructor(scene, rects, objectMat, shadowMat) {
+  /** @param anims  frame durations (seconds) per Aseprite tag, e.g. anims.walk_left */
+  constructor(scene, rects, anims, objectMat, shadowMat) {
     this.rects = rects;
+    this.anims = anims;
     this.x = 0;
     this.y = 0;
     this.dir = 'down';
     this.anim = 'idle';
-    this.character = 'swordsman';
     this.moving = false;
     this.animTime = 0;
     this.explore = false;
 
-    const r = rects.swordsman_idle_down_0;
+    const r = rects.player_idle_down_0;
     this.w = r.w;
     this.h = r.h;
     const g = new THREE.BufferGeometry();
@@ -40,7 +41,7 @@ export class Player {
     this.shadow.renderOrder = -1;
     scene.add(this.shadow);
 
-    this.setFrame('swordsman_idle_down_0');
+    this.setFrame('player_idle_down_0');
   }
 
   setFrame(name) {
@@ -51,6 +52,17 @@ export class Player {
     uv.setXY(2, r.u1, r.v1);
     uv.setXY(3, r.u0, r.v1);
     uv.needsUpdate = true;
+  }
+
+  /** Index of the frame showing at animTime, looping, using Aseprite's frame durations. */
+  frameAt(durations) {
+    const total = durations.reduce((a, b) => a + b, 0);
+    let t = this.animTime % total;
+    for (let i = 0; i < durations.length; i++) {
+      t -= durations[i];
+      if (t < 0) return i;
+    }
+    return durations.length - 1;
   }
 
   canStand(x, y, gen, chunks) {
@@ -96,8 +108,8 @@ export class Player {
       this.animTime = 0;
     }
     this.animTime += dt;
-    const { fps, count } = HERO_ANIMS[anim];
-    this.setFrame(`${this.character}_${anim}_${this.dir}_${Math.floor(this.animTime * fps) % count}`);
+    const tag = `${anim}_${this.dir}`;
+    this.setFrame(`player_${tag}_${this.frameAt(this.anims[tag])}`);
 
     // Snap to whole pixels so the sprite stays crisp.
     const px = Math.round(this.x);

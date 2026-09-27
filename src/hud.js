@@ -304,9 +304,9 @@ export class Hud {
     root.append(this.night, portraitBox, bars, right, interact, backpack, this.runButton, this.thoughts);
   }
 
-  /** Redraw the portrait from the character's front idle frame (head only, 2x). */
-  setCharacter(id) {
-    const r = this.atlas.rects[`${id}_idle_down_0`];
+  /** Draw the portrait from the player's front idle frame (head only, 2x). */
+  drawPortrait() {
+    const r = this.atlas.rects.player_idle_down_0;
     const size = this.atlas.canvas.width;
     const ctx = this.portrait.getContext('2d');
     ctx.clearRect(0, 0, 34, 34);

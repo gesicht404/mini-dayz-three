@@ -1,5 +1,4 @@
-import { hashFloat, mulberry32 } from '../world/rng.js';
-import { HERO } from './hero-data.js';
+import { mulberry32 } from '../world/rng.js';
 
 // Placeholder pixel art, drawn in code, styled after Mini DayZ: muted
 // grey-green palette, canopies built from many small shaded leaf clumps,
@@ -364,441 +363,41 @@ function shadow(w, h, alpha = 105) {
 }
 
 // ---------- Player ----------
-// The hero is the CraftPix swordsman (level 2), rebuilt pixel by pixel from
-// hero-data.js, which tools/extract_hero.py generates from the sprite sheets.
-// No image files are loaded at runtime. Characters start without weapons, so
-// the sword is removed from every frame (the data keeps it for later).
+// The survivor is drawn in Aseprite: assets/player.aseprite, one tag per
+// animation and direction (idle_down, walk_left, ...). Aseprite's
+// File > Export Sprite Sheet writes assets/player.png and assets/player.json
+// (JSON array, with tags); the game loads those two files as they are.
 
-/** Empty rows under the hero's feet in each frame. */
-export const PLAYER_FEET_OFFSET = HERO.feet;
+/** Empty rows under the player's feet in each frame. */
+export const PLAYER_FEET_OFFSET = 1;
 
-/** Frame count and speed of each animation, e.g. { walk: { fps: 10, count: 6 } }. */
-export const HERO_ANIMS = Object.fromEntries(
-  Object.entries(HERO.anims).map(([name, a]) => [name, { fps: a.fps, count: a.frames.down.length }]),
-);
-
-const HERO_RGB = Object.fromEntries(Object.entries(HERO.palette).map(([ch, hex]) => [ch, rgb(hex)]));
-
-const HAIR_CHARS = '!#&%()';
-const EYE_CHARS = '/0';
-const HEAD_CHARS = `${HAIR_CHARS},+*B3-/012`; // hair, skin and eyes
-const SWORD_CHARS = 'EFJKL';
-
-/**
- * Decode a frame into a grid of palette characters with the sword removed and
- * `hand` (cells from swordHand) drawn where it was held.
- */
-function unarmedGrid(data, hand) {
-  const grid = swordlessGrid(data);
-  const grip = findGrip(data);
-  if (grip && hand) drawFist(grid, grip, hand);
-  return grid;
+/** Load the player sheet exported from Aseprite: { image, data }. */
+export async function loadPlayerSheet() {
+  const url = (file) => new URL(`../../assets/${file}`, import.meta.url);
+  const image = new Image();
+  image.src = url('player.png');
+  const [data] = await Promise.all([fetch(url('player.json')).then((r) => r.json()), image.decode()]);
+  return { image, data };
 }
 
 /**
- * The frame's grid with the sword taken out. Where the blade crossed in front
- * of the body, the hole is filled from the neighbouring pixels so no gaps are left.
+ * Cut the sheet into one canvas per frame, named player_<tag>_<i>
+ * (e.g. player_walk_left_3), and return each tag's frame durations in seconds.
  */
-function swordlessGrid(data) {
-  const { w, h } = HERO;
-  const grid = [];
-  for (let y = 0; y < h; y++) grid.push(data.slice(y * w, y * w + w).split(''));
-  const holes = [];
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (SWORD_CHARS.includes(grid[y][x])) {
-        grid[y][x] = '.';
-        holes.push([x, y]);
-      }
+function playerFrames({ image, data }, sprites) {
+  const anims = {};
+  for (const tag of data.meta.frameTags) {
+    anims[tag.name] = [];
+    for (let i = tag.from; i <= tag.to; i++) {
+      const { frame, duration } = data.frames[i];
+      const c = makeCanvas(frame.w, frame.h);
+      c.getContext('2d').drawImage(image, frame.x, frame.y, frame.w, frame.h, 0, 0, frame.w, frame.h);
+      sprites[`player_${tag.name}_${i - tag.from}`] = c;
+      anims[tag.name].push(duration / 1000);
     }
   }
-  const at = (x, y) => (x >= 0 && y >= 0 && x < w && y < h ? grid[y][x] : '.');
-  const isHole = new Set(holes.map(([x, y]) => y * w + x));
-  for (let pass = 0; pass < 3; pass++) {
-    for (const [x, y] of holes) {
-      if (grid[y][x] !== '.') continue;
-      const l = at(x - 1, y);
-      const r = at(x + 1, y);
-      const u = at(x, y - 1);
-      const d = at(x, y + 1);
-      if (l !== '.' && r !== '.') grid[y][x] = l;
-      else if (u !== '.' && d !== '.') grid[y][x] = u;
-    }
-  }
-  // Wider gaps (a blade lying across a leg) are filled when the body shows on
-  // both sides of the run: each half copies the pixel on its side.
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (grid[y][x] !== '.' || !isHole.has(y * w + x) || at(x - 1, y) === '.') continue;
-      let end = x;
-      while (end < w && grid[y][end] === '.' && isHole.has(y * w + end)) end++;
-      if (at(end, y) === '.') continue;
-      const mid = (x + end) / 2;
-      for (let i = x; i < end; i++) grid[y][i] = i < mid ? grid[y][x - 1] : grid[y][end];
-    }
-  }
-  return grid;
+  return anims;
 }
-
-const SKIN_CHARS = '*+,3B';
-const FIST_OUTLINE = '-';
-
-/** Row of the eyes (lowest one), or 0 when the face is not visible. */
-function eyeRowOf(data) {
-  let row = 0;
-  for (let i = 0; i < data.length; i++) if (EYE_CHARS.includes(data[i])) row = Math.floor(i / HERO.w);
-  return row;
-}
-
-/**
- * Where the hand held the sword: between the top of the hilt and the end of the
- * arm (the nearest skin below the face), or the hilt alone if no arm is close.
- */
-function findGrip(data) {
-  const { w, h } = HERO;
-  let hilt = null;
-  for (let i = 0; i < w * h && !hilt; i++) if (SWORD_CHARS.includes(data[i])) hilt = [i % w, Math.floor(i / w)];
-  if (!hilt) return null;
-  let arm = null;
-  let best = 4;
-  for (let y = eyeRowOf(data) + 3; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (!'*+,3'.includes(data[y * w + x])) continue;
-      const d = Math.max(Math.abs(x - hilt[0]), Math.abs(y - hilt[1]));
-      if (d < best) {
-        best = d;
-        arm = [x, y];
-      }
-    }
-  }
-  return arm ? [Math.round((hilt[0] + arm[0]) / 2), Math.round((hilt[1] + arm[1]) / 2)] : hilt;
-}
-
-/**
- * The free hand in this frame: `cells` as [dx, dy, char] relative to its
- * bottom left corner (`left`, `bottom`), taken from the lowest three rows of the biggest patch of skin below the face that
- * is not the sword arm. Null when that hand is hidden behind the body.
- */
-function freeHand(grid, [gx, gy], eyeRow) {
-  const { w, h } = HERO;
-  const seen = new Set();
-  let hand = null;
-  for (let y = eyeRow + 3; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (seen.has(y * w + x) || !SKIN_CHARS.includes(grid[y][x])) continue;
-      const cells = [];
-      const stack = [[x, y]];
-      seen.add(y * w + x);
-      while (stack.length) {
-        const [cx, cy] = stack.pop();
-        cells.push([cx, cy]);
-        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          const nx = cx + dx;
-          const ny = cy + dy;
-          if (nx < 0 || nx >= w || ny <= eyeRow + 2 || ny >= h || seen.has(ny * w + nx)) continue;
-          if (!SKIN_CHARS.includes(grid[ny][nx])) continue;
-          seen.add(ny * w + nx);
-          stack.push([nx, ny]);
-        }
-      }
-      const nearGrip = cells.some(([cx, cy]) => Math.max(Math.abs(cx - gx), Math.abs(cy - gy)) <= 2);
-      if (!nearGrip && cells.length >= 3 && (!hand || cells.length > hand.length)) hand = cells;
-    }
-  }
-  if (!hand) return null;
-  const bottom = Math.max(...hand.map(([, y]) => y));
-  const lower = hand.filter(([, y]) => y > bottom - 3);
-  const left = Math.min(...lower.map(([x]) => x));
-  // A thin sliver is the edge of an arm, not a whole hand.
-  if (lower.length < 4 || Math.max(...lower.map(([x]) => x)) === left) return null;
-  return { cells: lower.map(([x, y]) => [x - left, y - bottom, grid[y][x]]), left, bottom };
-}
-
-const handWidth = (cells) => Math.max(...cells.map(([dx]) => dx)) + 1;
-
-/** The free hand of a frame (see freeHand), or null if it is hidden. */
-function spareHand(data) {
-  const grip = findGrip(data);
-  return grip && freeHand(swordlessGrid(data), grip, eyeRowOf(data));
-}
-
-/**
- * The sword hand for a left-facing frame: a copy of that frame's free hand, or
- * the idle pose's free hand when this frame's is hidden.
- */
-function swordHand(anim, i) {
-  return spareHand(HERO.anims[anim].frames.left[i]) ?? spareHand(HERO.anims.idle.frames.left[0]);
-}
-
-const BELT = 'C';
-// Legs, boots, belt, hair and eyes are never moved when the arms are mirrored.
-const KEEP_CHARS = `GTWPHIRMNQSVUXYDC${HAIR_CHARS}/012`;
-
-/** The belt's row and column range in a grid, or null if it is not visible. */
-function beltOf(grid) {
-  let top = null;
-  let x0 = HERO.w;
-  let x1 = -1;
-  grid.forEach((row, y) => row.forEach((ch, x) => {
-    if (ch !== BELT) return;
-    top ??= y;
-    x0 = Math.min(x0, x);
-    x1 = Math.max(x1, x);
-  }));
-  return top === null ? null : { top, x0, x1 };
-}
-
-/**
- * Facing down or up both arms show, so the sword arm is replaced by a mirror
- * image of the free arm (sleeve and hand) from `src`, reflected across the
- * belt. `src` is this frame when standing still, and the frame half a step
- * away when moving so the arms swing in turn. `swordLeft` says which side the
- * sword was held on.
- */
-function mirrorArms(grid, src, swordLeft) {
-  const { w, h } = HERO;
-  const belt = beltOf(grid);
-  const srcBelt = beltOf(src);
-  if (!belt || !srcBelt) return;
-  const dy = belt.top - srcBelt.top;
-  const outside = (x, b) => (swordLeft ? x < b.x0 : x > b.x1);
-  const y0 = Math.max(0, belt.top - 6);
-  const y1 = Math.min(h - 1, belt.top + 5);
-  // Clear the sword arm...
-  for (let y = y0; y <= y1; y++) {
-    for (let x = 0; x < w; x++) if (outside(x, belt) && !KEEP_CHARS.includes(grid[y][x])) grid[y][x] = '.';
-  }
-  // ...and draw the free arm reflected in its place.
-  for (let sy = y0 - dy; sy <= y1 - dy; sy++) {
-    if (sy < 0 || sy >= h) continue;
-    for (let sx = 0; sx < w; sx++) {
-      const ch = src[sy][sx];
-      const free = swordLeft ? sx > srcBelt.x1 : sx < srcBelt.x0;
-      if (!free || ch === '.' || KEEP_CHARS.includes(ch)) continue;
-      const x = srcBelt.x0 + srcBelt.x1 - sx + (belt.x0 + belt.x1 - srcBelt.x0 - srcBelt.x1) / 2;
-      const dx = Math.round(x);
-      const y = sy + dy;
-      if (dx >= 0 && dx < w && y >= 0 && y < h && grid[y][dx] === '.') grid[y][dx] = ch;
-    }
-  }
-}
-
-let rightShiftCache = null;
-
-/**
- * Columns to move mirrored left-facing frames so the body stands where the
- * original right-facing art had it (measured once, on the idle pose, so every
- * frame moves the same amount).
- */
-function rightShift() {
-  if (rightShiftCache === null) {
-    const want = beltOf(swordlessGrid(HERO.anims.idle.frames.right[0]));
-    const got = beltOf(swordlessGrid(HERO.anims.idle.frames.left[0]).map((row) => [...row].reverse()));
-    rightShiftCache = want && got ? Math.round((want.x0 + want.x1 - got.x0 - got.x1) / 2) : 0;
-  }
-  return rightShiftCache;
-}
-
-/**
- * The swordless grid for a frame, with the sword hand redrawn:
- * - left: a copy of the free hand at the grip;
- * - right: the matching left-facing frame, mirrored, so both views match;
- * - down / up: the free arm mirrored onto the sword side.
- */
-function frameGrid(anim, dir, i) {
-  const { w } = HERO;
-  const frames = HERO.anims[anim].frames;
-  if (dir === 'right') {
-    const shift = rightShift();
-    return frameGrid(anim, 'left', i).map((row) => {
-      const flipped = [...row].reverse();
-      return flipped.map((_, x) => flipped[x - shift] ?? '.');
-    });
-  }
-  if (dir === 'left') return unarmedGrid(frames.left[i], swordHand(anim, i));
-  const data = frames[dir][i];
-  const grid = swordlessGrid(data);
-  const grip = findGrip(data);
-  const belt = beltOf(grid);
-  if (!grip || !belt) return grid;
-  const n = frames[dir].length;
-  const src = anim === 'idle' ? grid : swordlessGrid(frames[dir][(i + Math.floor(n / 2)) % n]);
-  mirrorArms(grid, src.map((row) => [...row]), grip[0] * 2 < belt.x0 + belt.x1);
-  return grid;
-}
-
-/** Draw the sword hand (from swordHand) in front of the body, with a dark rim. */
-function drawFist(grid, [gx, gy], hand) {
-  const { w, h } = HERO;
-  const ox = gx - Math.ceil(handWidth(hand.cells) / 2); // centred on the grip
-  const oy = gy + 1; // bottom row of the hand
-  const cells = hand.cells.map(([dx, dy, ch]) => [ox + dx, oy + dy, ch]);
-  const inFist = (x, y) => cells.some(([cx, cy]) => cx === x && cy === y);
-  for (const [x, y] of cells) {
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const nx = x + dx;
-      const ny = y + dy;
-      if (nx < 0 || ny < 0 || nx >= w || ny >= h || inFist(nx, ny)) continue;
-      if (grid[ny][nx] === '.') grid[ny][nx] = FIST_OUTLINE;
-    }
-  }
-  for (const [x, y, ch] of cells) if (x >= 0 && y >= 0 && x < w && y < h) grid[y][x] = ch;
-}
-
-function heroFrame(grid) {
-  const pix = new Pix(HERO.w, HERO.h);
-  grid.forEach((row, y) => row.forEach((ch, x) => ch !== '.' && pix.set(x, y, HERO_RGB[ch])));
-  return pix.toCanvas();
-}
-
-// ---------- Soldier (derived from the swordsman) ----------
-// Same frames and poses, in a woodland digital-camo uniform with a tactical
-// vest, black boots and a helmet over the hair. Colour groups are the
-// swordsman's palette characters.
-
-const luminance = ([r, g, b]) => 0.299 * r + 0.587 * g + 0.114 * b;
-
-/** Characters of a group sorted dark to light, with each one's rank in [0, 1]. */
-function rankGroup(chars) {
-  const sorted = [...chars].sort((a, b) => luminance(HERO_RGB[a]) - luminance(HERO_RGB[b]));
-  return sorted.map((ch, i) => [ch, sorted.length === 1 ? 1 : i / (sorted.length - 1)]);
-}
-
-/** Map each palette character in a group onto a target ramp, keeping dark-to-light order. */
-function remapGroups(groups) {
-  const map = {};
-  for (const { chars, ramp } of groups) {
-    for (const [ch, r] of rankGroup(chars)) map[ch] = rgb(ramp[Math.round(r * (ramp.length - 1))]);
-  }
-  return map;
-}
-
-const CAMO_CHARS = '4567:=9A@GTWPHIR'; // jacket + trousers
-const CAMO_RANK = Object.fromEntries([...rankGroup('4567:=9A@'), ...rankGroup('GTWPHIR')]);
-
-const SOLDIER_RGB = {
-  ...HERO_RGB,
-  ...remapGroups([
-    { chars: '8;<>?O', ramp: ['#3b3628', '#4d4634', '#615842', '#756b50'] }, // tactical vest
-    { chars: 'CD', ramp: ['#1c1c18', '#2c2b24'] }, // belt
-    { chars: 'MNQSVUXY', ramp: ['#141414', '#1e1d1c', '#2a2826', '#363330'] }, // boots
-    { chars: HAIR_CHARS, ramp: ['#141210', '#1f1b18', '#2b2621', '#37302a'] }, // short dark hair
-  ]),
-};
-
-// Woodland digital camo: each 2x2 block picks one of these colours, then the
-// pixel's original light/shade picks the shade within it.
-const CAMO = [
-  { weight: 0.45, ramp: ['#2c3322', '#3b4430', '#4b563b', '#5c6848', '#6e7b55'] }, // olive
-  { weight: 0.25, ramp: ['#1f2619', '#283222', '#323e2a', '#3d4a33', '#48573c'] }, // dark green
-  { weight: 0.18, ramp: ['#2e261c', '#3c3225', '#4c402f', '#5c4e3a', '#6c5c45'] }, // brown
-  { weight: 0.12, ramp: ['#4d4a36', '#5f5b43', '#716d51', '#847f5f', '#96906d'] }, // tan
-].map((c) => ({ ...c, ramp: c.ramp.map(rgb) }));
-
-function camoColor(ch, x, y) {
-  let r = hashFloat(Math.floor(x / 2), Math.floor(y / 2), 4242);
-  let pick = CAMO[0];
-  for (const c of CAMO) {
-    r -= c.weight;
-    if (r < 0) {
-      pick = c;
-      break;
-    }
-  }
-  return pick.ramp[Math.round(CAMO_RANK[ch] * (pick.ramp.length - 1))];
-}
-
-const HELMET = ['#2a3120', '#3a4429', '#4b5634', '#5d6a40', '#71804f'].map(rgb);
-const HELMET_OUTLINE = rgb('#171a12');
-
-const HELMET_ROWS = 6; // dome height including the brim row
-
-/**
- * Where the helmet goes in a frame: the brim row (two above the eyes, or below
- * the top of the hair from behind) and the skull's centre and half width at
- * forehead level. The spiky hair is ignored: it sticks out to one side and
- * changes shape from frame to frame. Null when no hair is visible.
- */
-function helmetFit(grid) {
-  const { w, h } = HERO;
-  let hairTop = h;
-  let eyeRow = null;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (HAIR_CHARS.includes(grid[y][x])) hairTop = Math.min(hairTop, y);
-      if (eyeRow === null && EYE_CHARS.includes(grid[y][x])) eyeRow = y;
-    }
-  }
-  if (hairTop === h) return null;
-  const brim = eyeRow !== null ? eyeRow - 2 : hairTop + 8;
-  let x0 = w;
-  let x1 = -1;
-  for (let y = brim; y <= Math.min(h - 1, brim + 2); y++) {
-    for (let x = 0; x < w; x++) {
-      if (HEAD_CHARS.includes(grid[y][x])) {
-        x0 = Math.min(x0, x);
-        x1 = Math.max(x1, x);
-      }
-    }
-  }
-  return { brim, cx: (x0 + x1 + 1) / 2, rx: (x1 - x0 + 1) / 2 - 1 }; // a bit narrower than the skull so it hugs the head
-}
-
-/**
- * `helmetRx` fixes the helmet's half width, so it keeps one size through an
- * animation instead of following the hair.
- */
-function soldierFrame(grid, helmetRx) {
-  const { w, h } = HERO;
-  const fit = helmetFit(grid);
-  const brim = fit ? fit.brim : 0;
-  const top = brim - HELMET_ROWS + 1;
-
-  // Body: camo uniform; hair spikes above the helmet are dropped.
-  const pix = new Pix(w, h);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const ch = grid[y][x];
-      if (ch === '.' || (fit && y < top && HAIR_CHARS.includes(ch))) continue;
-      pix.set(x, y, CAMO_CHARS.includes(ch) ? camoColor(ch, x, y) : SOLDIER_RGB[ch]);
-    }
-  }
-  if (!fit) return pix.toCanvas();
-  const { cx } = fit;
-  const rx = helmetRx ?? fit.rx;
-
-  // Helmet on top: an upper half-ellipse plus a wider brim row.
-  const helmet = new Set();
-  for (let y = top; y <= brim; y++) {
-    const t = (brim - y) / (brim - top + 1); // 1 near the top, 0 at the brim
-    const hw = y === brim ? rx + 0.5 : rx * Math.sqrt(1 - t * t);
-    for (let x = Math.floor(cx - hw); x < Math.ceil(cx + hw); x++) {
-      const nx = (x + 0.5 - cx) / rx;
-      if (Math.abs(nx) > hw / rx + 0.01) continue;
-      let s = 0.55 - nx * 0.3 + t * 0.35;
-      if (y === brim) s = 0.15;
-      pix.set(x, y, HELMET[Math.max(0, Math.min(HELMET.length - 1, Math.floor(s * HELMET.length)))]);
-      helmet.add(y * w + x);
-    }
-  }
-  // Remove leftover hair next to the helmet, then outline the helmet.
-  for (let y = Math.max(0, top); y <= brim; y++) {
-    for (let x = 0; x < w; x++) {
-      if (!helmet.has(y * w + x) && HAIR_CHARS.includes(grid[y][x])) pix.px[y * w + x] = null;
-    }
-  }
-  for (const k of helmet) {
-    const x = k % w;
-    const y = Math.floor(k / w);
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, -1]]) {
-      if (!pix.has(x + dx, y + dy)) pix.set(x + dx, y + dy, HELMET_OUTLINE);
-    }
-  }
-  return pix.toCanvas();
-}
-
-/** Playable characters: id -> display name. Frames are <id>_<anim>_<dir>_<i>. */
-export const CHARACTERS = { swordsman: 'Swordsman', soldier: 'Soldier' };
 
 // ---------- Ground decals (painted straight into chunk ground) ----------
 
@@ -843,7 +442,8 @@ function flower(color) {
 
 // ---------- Atlas ----------
 
-export function buildSprites() {
+/** @param playerSheet  the Aseprite export from loadPlayerSheet() */
+export function buildSprites(playerSheet) {
   const sprites = {
     oak0: leafyTree(11, [LEAF]),
     oak1: leafyTree(23, [LEAF], 38, 52),
@@ -872,22 +472,7 @@ export function buildSprites() {
     shadowL: shadow(38, 12),
   };
 
-  // Character frames are named <character>_<anim>_<dir>_<i>, e.g. soldier_walk_left_3.
-  for (const [anim, a] of Object.entries(HERO.anims)) {
-    for (const [dir, frames] of Object.entries(a.frames)) {
-      // Idle facing up only has 4 of its 12 frames drawn, and frames 1-3 are a
-      // different pose (sword arm raised). The front idle keeps the body still
-      // and only blinks, so the back idle holds its first frame.
-      const still = anim === 'idle' && dir === 'up';
-      // One helmet size per direction, taken from the standing pose.
-      const helmetRx = helmetFit(frameGrid('idle', dir, 0))?.rx;
-      frames.forEach((_, i) => {
-        const grid = frameGrid(anim, dir, still ? 0 : i);
-        sprites[`swordsman_${anim}_${dir}_${i}`] = heroFrame(grid);
-        sprites[`soldier_${anim}_${dir}_${i}`] = soldierFrame(grid, helmetRx);
-      });
-    }
-  }
+  const playerAnims = playerFrames(playerSheet, sprites);
 
   const decals = {
     // Little yellow-green grass mounds, the most common ground clutter.
@@ -898,7 +483,7 @@ export function buildSprites() {
     flowers: [flower('#d0c8b8'), flower('#b8a0c0'), flower('#d0b860')],
   };
 
-  return { atlas: packAtlas(sprites), decals };
+  return { atlas: packAtlas(sprites), decals, playerAnims };
 }
 
 /** Simple shelf packer: puts every sprite into one canvas, returns UV rects. */

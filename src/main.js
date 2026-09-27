@@ -9,7 +9,7 @@ import {
 import { ChunkManager } from "./world/chunks.js";
 import { OBJECTS } from "./world/objects.js";
 import { seedFromText } from "./world/rng.js";
-import { buildSprites, CHARACTERS } from "./gfx/sprites.js";
+import { buildSprites, loadPlayerSheet } from "./gfx/sprites.js";
 import { biomeColor } from "./gfx/ground.js";
 import { FogMemory, FOG_COLOR } from "./world/fog.js";
 import { Player } from "./player.js";
@@ -132,7 +132,7 @@ for (const type of ["pointerup", "pointercancel"]) {
 
 // ---------- World ----------
 
-const sprites = buildSprites();
+const sprites = buildSprites(await loadPlayerSheet());
 const params = new URLSearchParams(location.search);
 let seedText = params.get("seed") || String(Math.floor(Math.random() * 1e9));
 let gen = new WorldGenerator(seedFromText(seedText));
@@ -140,6 +140,7 @@ const chunks = new ChunkManager(scene, gen, sprites);
 const player = new Player(
   scene,
   sprites.atlas.rects,
+  sprites.playerAnims,
   chunks.objectMat,
   chunks.shadowMat,
 );
@@ -243,8 +244,6 @@ window.addEventListener("keydown", (e) => {
     zoomBy(1);
   } else if (e.code === "Minus" || e.code === "NumpadSubtract") {
     zoomBy(-1);
-  } else if (e.code === "KeyC") {
-    cycleCharacter();
   } else if (e.code === "KeyM") {
     ui.minimap.classList.toggle("hidden");
   }
@@ -327,7 +326,6 @@ function updateJournal() {
     ["Bandits killed", survival.stats.banditsKilled],
     ["Karma", survival.stats.karma],
     ["Days survived", survival.daysSurvived],
-    ["Character", CHARACTERS[player.character]],
   ];
   ui.journalStats.innerHTML = rows
     .map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`)
@@ -352,33 +350,7 @@ for (const el of document.querySelectorAll("#panel input, #panel button")) {
   el.addEventListener("keyup", (e) => e.key !== "Enter" && e.stopPropagation());
 }
 
-// Character choice, remembered per browser.
-function setCharacter(id) {
-  player.character = id;
-  ui.character.textContent = CHARACTERS[id];
-  hud.setCharacter(id);
-  try {
-    localStorage.setItem("character", id);
-  } catch {
-    // storage unavailable (private mode): the choice just isn't remembered
-  }
-}
-function cycleCharacter() {
-  const ids = Object.keys(CHARACTERS);
-  setCharacter(ids[(ids.indexOf(player.character) + 1) % ids.length]);
-}
-ui.character = $("character");
-ui.character.addEventListener("click", () => {
-  cycleCharacter();
-  ui.character.blur();
-});
-let savedCharacter = null;
-try {
-  savedCharacter = localStorage.getItem("character");
-} catch {
-  // ignore
-}
-setCharacter(CHARACTERS[savedCharacter] ? savedCharacter : "swordsman");
+hud.drawPortrait();
 
 let mouse = null;
 canvas.addEventListener(

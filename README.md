@@ -14,7 +14,7 @@ Add `?seed=12345&x=100&y=-50` to the URL to open a specific seed at a tile posit
 ## Controls
 
 WASD / arrows move · Shift (or the boot button) run · I / Tab (or the backpack button) inventory ·
-C switch character · J journal ·
+J journal ·
 F3 (or the gear button) debug panel with seed, teleport and minimap · F explore mode ·
 + / − or mouse wheel / pinch: zoom · M minimap · hover objects to see resources
 
@@ -57,8 +57,7 @@ heat raises your temperature. You start with a T-shirt (berries) and jeans
 - `src/world/chunks.js`: loads/unloads chunks around the player and builds meshes
 - `src/world/fog.js`: fog of war for the minimap (which tiles you've seen, saved per seed)
 - `src/gfx/sprites.js`: pixel art drawn in code, packed into one atlas
-- `src/gfx/hero-data.js`: the player's frames as pixel data (generated, don't edit)
-- `tools/extract_hero.py`: regenerates `hero-data.js` from the CraftPix Swordsman sheets
+- `assets/player.aseprite`: the player's art; `player.png` + `player.json` are its Aseprite export
 - `src/gfx/ground.js`: paints each chunk's ground texture
 - `src/player.js`: movement, animation, collision
 - `src/survival.js`: health, water, food, temperature, clock, thoughts
@@ -70,13 +69,12 @@ heat raises your temperature. You start with a T-shirt (berries) and jeans
 
 ## Player art
 
-The player is the CraftPix "Swordsman" (level 2), © CraftPix.net, used under
-https://craftpix.net/file-licenses/. The frames are stored as pixel data in
-`src/gfx/hero-data.js` and drawn in code, so no image files are loaded. The
-Soldier character is made from the same frames in `soldierFrame()` (sprites.js):
-an army recolour plus a helmet drawn over the hair. To switch
-level or re-extract (needs Python + Pillow):
-
-```bash
-python tools/extract_hero.py "<pack>/PNG/Swordsman_lvl2/Without_shadow"
-```
+The player is a bald survivor in shorts, made from the CraftPix "Swordsman"
+(level 1), © CraftPix.net, used under https://craftpix.net/file-licenses/.
+Edit it in `assets/player.aseprite`: layers body, shorts, head and a hidden
+hair layer; one tag per animation and direction (`idle_down`, `walk_left`,
+`run_up`, ...), with the frame timings the game uses. After editing, use
+File > Export Sprite Sheet with Output > JSON Data (Array), Tags checked,
+saved over `assets/player.png` and `assets/player.json`. The game loads those
+two files as they are. Keep the bottom row of the canvas empty (the feet stand on
+the row above it).
